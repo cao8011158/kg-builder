@@ -1,0 +1,11 @@
+$ python /workspace/scratch/fb0b6c3eb637/private_data/independent_checks.py /workspace/scratch/fb0b6c3eb637/research-knowledge-system/kg-builder
+Traceback (most recent call last):
+  File "/workspace/scratch/fb0b6c3eb637/private_data/independent_checks.py", line 39, in <module>
+    r2=reconcile([d/'out.db',d/'input.db'],d/'out2.db',d/'r2.json')
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/fb0b6c3eb637/research-knowledge-system/kg-builder/scripts/reconcile_sqlite.py", line 206, in reconcile
+    out.execute('INSERT INTO reconciliation_audit VALUES(?,?,?,?,?,?)',
+sqlite3.IntegrityError: UNIQUE constraint failed: reconciliation_audit.input_sha256, reconciliation_audit.table_name, reconciliation_audit.ordinal
+
+exit_code=1
+elapsed=0.915s

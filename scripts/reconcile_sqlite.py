@@ -114,6 +114,30 @@ def reconcile(inputs, output, report):
             PRIMARY KEY(input_sha256,original_paper_id))''')
         hashes = [hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs]
         version_map = {}
+        def save_audit(input_hash, table, ordinal, original_json, paper_id, version_id):
+            key = (input_hash,table,ordinal)
+            previous = out.execute('''SELECT original_json FROM reconciliation_audit
+                WHERE input_sha256=? AND table_name=? AND ordinal=?''',key).fetchone()
+            if previous:
+                if previous[0] != original_json:
+                    raise ValueError(f'Conflicting provenance for audit key {key}')
+                # The active merge may resolve more identities than an earlier run.
+                out.execute('''UPDATE reconciliation_audit SET mapped_paper_id=?,mapped_version_id=?
+                    WHERE input_sha256=? AND table_name=? AND ordinal=?''',
+                    (paper_id,version_id,*key))
+            else:
+                out.execute('INSERT INTO reconciliation_audit VALUES(?,?,?,?,?,?)',
+                            (*key,original_json,paper_id,version_id))
+
+        def save_redirect(input_hash, old_id, new_id):
+            previous = out.execute('''SELECT paper_id FROM paper_redirects
+                WHERE input_sha256=? AND original_paper_id=?''',(input_hash,old_id)).fetchone()
+            if previous:
+                # A repeated source must point to the final canonical paper.
+                out.execute('''UPDATE paper_redirects SET paper_id=? WHERE
+                    input_sha256=? AND original_paper_id=?''',(new_id,input_hash,old_id))
+            else:
+                out.execute('INSERT INTO paper_redirects VALUES(?,?,?)',(input_hash,old_id,new_id))
         try:
             with out:
                 for group in groups.values():
@@ -132,7 +156,7 @@ def reconcile(inputs, output, report):
                     for doi in sorted(all_dois):
                         out.execute('INSERT OR IGNORE INTO paper_doi_aliases VALUES(?,?)',(doi,winner))
                     for i,pid in group:
-                        out.execute('INSERT INTO paper_redirects VALUES(?,?,?)',(hashes[i],pid,winner))
+                        save_redirect(hashes[i],pid,winner)
                 for i,d in enumerate(datasets):
                     for v in d['paper_versions']:
                         target = mapping[(i,v['paper_id'])]
@@ -203,22 +227,19 @@ def reconcile(inputs, output, report):
                         for index,row in enumerate(d[table]):
                             original_pid = row.get('paper_id')
                             original_vid = row.get('version_id')
-                            out.execute('INSERT INTO reconciliation_audit VALUES(?,?,?,?,?,?)',
-                                (hashes[i],table,index,json.dumps(row,ensure_ascii=False,sort_keys=True),
-                                 mapping.get((i,original_pid)) if original_pid else None,
-                                 version_map.get((i,original_vid)) if original_vid else None))
+                            save_audit(hashes[i],table,index,json.dumps(row,ensure_ascii=False,sort_keys=True),
+                                       mapping.get((i,original_pid)) if original_pid else None,
+                                       version_map.get((i,original_vid)) if original_vid else None)
                     # Keep the full history if an input was itself a prior reconciliation.
                     try:
                         for prior in rows(dbs[i],'reconciliation_audit'):
-                            out.execute('INSERT OR IGNORE INTO reconciliation_audit VALUES(?,?,?,?,?,?)',
-                                (prior['input_sha256'],prior['table_name'],prior['ordinal'],prior['original_json'],
-                                 mapping.get((i,prior['mapped_paper_id']),prior['mapped_paper_id']),
-                                 version_map.get((i,prior['mapped_version_id']),prior['mapped_version_id'])))
+                            save_audit(prior['input_sha256'],prior['table_name'],prior['ordinal'],prior['original_json'],
+                                       mapping.get((i,prior['mapped_paper_id']),prior['mapped_paper_id']),
+                                       version_map.get((i,prior['mapped_version_id']),prior['mapped_version_id']))
                         for prior in rows(dbs[i],'paper_redirects'):
                             target = mapping.get((i,prior['paper_id']))
                             if target:
-                                out.execute('INSERT OR IGNORE INTO paper_redirects VALUES(?,?,?)',
-                                            (prior['input_sha256'],prior['original_paper_id'],target))
+                                save_redirect(prior['input_sha256'],prior['original_paper_id'],target)
                     except sqlite3.OperationalError:
                         pass
                 if out.execute('PRAGMA foreign_key_check').fetchall():

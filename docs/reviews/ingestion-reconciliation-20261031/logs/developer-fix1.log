@@ -1,0 +1,60 @@
+$ PYTHONPATH=src python -m unittest discover -s tests -v
+test_conflict_rollback_and_version_order (test_ingestion.IngestionTests.test_conflict_rollback_and_version_order) ... ok
+test_default_collectors_exclude_semantic_scholar (test_ingestion.IngestionTests.test_default_collectors_exclude_semantic_scholar) ... ok
+test_identifiers_and_source_enrichment (test_ingestion.IngestionTests.test_identifiers_and_source_enrichment) ... ok
+test_locality_index_plan_and_unrelated_growth (test_ingestion.IngestionTests.test_locality_index_plan_and_unrelated_growth) ... ok
+test_output_paths_and_source_history (test_ingestion.IngestionTests.test_output_paths_and_source_history) ... ok
+test_reconciliation_preserves_extractions_and_is_deterministic (test_ingestion.IngestionTests.test_reconciliation_preserves_extractions_and_is_deterministic) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.414s
+
+OK
+{
+  "started_at": "2026-10-30T20:09:41.019644+00:00",
+  "completed_at": "2026-10-30T20:09:41.033470+00:00",
+  "mode": "api_first_page",
+  "since": "2025-01-01",
+  "until": "2026-10-30",
+  "per_query": 10,
+  "db_before": {
+    "papers": 0,
+    "versions": 0,
+    "extractions": 0,
+    "sources": 0
+  },
+  "db_after": {
+    "papers": 0,
+    "versions": 0,
+    "extractions": 0,
+    "sources": 0
+  },
+  "by_source": {},
+  "queries": [
+    {
+      "source": "openalex",
+      "topic": "memory",
+      "query": "term",
+      "received": 0,
+      "stored": 0,
+      "date_filtered": 0,
+      "unknown_date": 0,
+      "errors": []
+    },
+    {
+      "source": "arxiv",
+      "topic": "memory",
+      "query": "term",
+      "received": 0,
+      "stored": 0,
+      "date_filtered": 0,
+      "unknown_date": 0,
+      "errors": []
+    }
+  ],
+  "successful_queries": 2,
+  "failed_queries": 0
+}
+exit_code=0
+$ git diff --check
+exit_code=0

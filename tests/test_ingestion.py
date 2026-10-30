@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import sqlite3
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -86,6 +87,31 @@ class IngestionTests(unittest.TestCase):
         self.assertEqual(sqlite3.connect(a).execute('SELECT COUNT(*) FROM papers').fetchone()[0],1)
         third=reconcile([self.dir/'out.db'],self.dir/'out3.db',self.dir/'report3.json')
         self.assertGreaterEqual(third['counts']['reconciliation_audit'],result['counts']['reconciliation_audit'])
+        repeated=reconcile([self.dir/'out.db',a],self.dir/'repeated.db',self.dir/'repeated.json')
+        for table in ('papers','paper_versions','source_records','extraction_records'):
+            self.assertEqual(repeated['counts'][table],result['counts'][table])
+        original_audit=sqlite3.connect(self.dir/'out.db').execute(
+            'SELECT COUNT(*) FROM reconciliation_audit').fetchone()[0]
+        self.assertGreaterEqual(repeated['counts']['reconciliation_audit'],original_audit)
+        duplicate=self.dir/'candidate_copy.db'
+        shutil.copyfile(a,duplicate)
+        self.assertEqual(a.read_bytes(),duplicate.read_bytes())
+        same=reconcile([a,duplicate],self.dir/'same_bytes.db',self.dir/'same_bytes.json')
+        self.assertEqual(same['counts']['papers'],1)
+        self.assertEqual(same['counts']['source_records'],1)
+        self.assertEqual(same['counts']['reconciliation_audit'],5)
+        self.assertEqual(a.read_bytes(),duplicate.read_bytes())
+        corrupted=self.dir/'altered_audit.db'
+        shutil.copyfile(self.dir/'out.db',corrupted)
+        tampered=sqlite3.connect(corrupted)
+        candidate_hash=__import__('hashlib').sha256(a.read_bytes()).hexdigest()
+        tampered.execute('''UPDATE reconciliation_audit SET original_json=?
+            WHERE input_sha256=? AND table_name='papers' AND ordinal=0''',
+            ('{"changed":true}',candidate_hash))
+        tampered.commit(); tampered.close()
+        with self.assertRaisesRegex(ValueError,'Conflicting provenance'):
+            reconcile([corrupted,a],self.dir/'reject.db',self.dir/'reject.json')
+        self.assertFalse((self.dir/'reject.db').exists())
 
     def test_output_paths_and_source_history(self):
         path=self.dir/'input.db'
