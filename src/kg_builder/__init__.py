@@ -1,1 +1,1 @@
-"""KG builder package; ingestion and extraction scaffolds are opt-in."""
+"""Academic paper source store, with optional disabled LLM adapter."""

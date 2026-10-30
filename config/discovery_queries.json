@@ -1,0 +1,11 @@
+{
+  "scope_start": "2025-01-01",
+  "topic_queries": {
+    "agent_memory": ["agent long term memory", "agent memory consolidation", "LLM memory retrieval"],
+    "context_management": ["agent context compression", "long horizon context management", "context compaction agents"],
+    "tool_use": ["tool use language model agent", "tool calling reinforcement learning", "agent tool selection"],
+    "rl_posttraining": ["reasoning reinforcement learning language models", "GRPO post training", "verifier reinforcement learning"],
+    "recursive_self_improvement": ["recursive self improvement coding agents", "self improving research agent", "self modifying agents"],
+    "skill_evolution": ["agent skill learning evolution", "self improving skills agent", "procedural skills LLM agents"]
+  }
+}
