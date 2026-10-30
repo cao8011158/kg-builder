@@ -5,16 +5,17 @@ Status: requirements specification; **not** a validated ingestion system.
 ## Literature scope
 
 - Date: **2025-01-01 onward** (inclusive; date refers to first public publication/version when known).
-- Topic umbrella: **Methods for improving LLM and AI-agent capabilities through memory, context, tool interaction, post-training and iterative self-improvement**.
+- Topic umbrella: **Research on LLM and AI-agent memory, context, tool use, RL post-training, recursive self-improvement, and skill management/evolution**.
 - Controlled subdomains:
   1. Agent memory: formation, storage, retrieval, update, consolidation, skill/procedural memory.
   2. Context management: context compaction, compression, selection, long-horizon context lifecycle and cache-aware context management where relevant.
   3. Tool use: planning, tool calling, tool selection, tool learning, execution reliability and evaluation.
   4. RL post-training: RLHF/PPO/GRPO/reasoning RL, reward design, verifiers and post-training evaluation. DPO and related preference optimization are included as adjacent comparators, not mislabeled as RL.
   5. Recursive self-improvement: agents that improve prompts, skills, policies, tools or code through iterative evaluation, feedback or self-revision.
+  6. Skill and self-improving skill: reusable procedural skills, natural-language or code skills, acquisition/generation, retrieval/triggering, composition, maintenance, verification, self-revision and skill library evolution.
 - Relevance gate: a paper must make a substantive methodological, empirical, or benchmark contribution to at least one subdomain. Apply multiple topic tags as appropriate.
 - Exclude general LLM announcements, unrelated retrieval systems, generic optimization and unrelated RL without a meaningful connection to the declared scope.
-- Boundary note: this domain is broader than the initial Agent Memory only pilot. Ontology classes should remain domain-neutral; topic tags and subdomain taxonomies can grow. Include 2025+ papers in the production corpus; the earlier 2023/2024 pilot is illustrative historical material, not automatically included in the target corpus.
+- Boundary note: this domain is broader than the initial Agent Memory only pilot. Papers may have multiple topic tags; skill evolution is a distinct domain that overlaps memory and recursive self-improvement. Ontology classes should remain domain-neutral; topic tags and subdomain taxonomies can grow. Include 2025+ papers in the production corpus; the earlier 2023/2024 pilot is illustrative historical material, not automatically included in the target corpus.
 
 ## Data sources / discovery
 
