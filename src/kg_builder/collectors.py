@@ -1,4 +1,4 @@
-"""Real API metadata collectors. Not used in the first bootstrap run (network restricted)."""
+"""Bounded first-page API metadata collectors."""
 from __future__ import annotations
 import json
 import os
@@ -64,23 +64,25 @@ def semantic_scholar_search(query,limit=20,year='2025-'):
           'source_id':x.get('paperId'),'source_payload':x}
 
 def arxiv_search(query,limit=20,since='2025-01-01'):
-    # arXiv Atom API. Search is not a universal freshness feed; the pipeline filters dates.
+    # arXiv Atom API. The caller filters first-release dates so it can count rejected hits.
     # arXiv API expects field-tagged terms with explicit AND.
     expression = ' AND '.join('all:'+t for t in query.split())
     args={'search_query':expression,'start':0,'max_results':min(limit,100),
           'sortBy':'submittedDate','sortOrder':'descending'}
     xml=fetch_bytes('https://export.arxiv.org/api/query?'+urlencode(args),headers={'Accept':'application/atom+xml'})
     root=ET.fromstring(xml)
-    ns={'a':'http://www.w3.org/2005/Atom'}
+    ns={'a':'http://www.w3.org/2005/Atom', 'arxiv':'http://arxiv.org/schemas/atom'}
     for e in root.findall('a:entry',ns):
         url=e.findtext('a:id',default='',namespaces=ns)
         pub=e.findtext('a:published',default='',namespaces=ns)
-        if not pub or pub[:10]<since: continue
+        updated=e.findtext('a:updated',default='',namespaces=ns)
         title=' '.join(e.findtext('a:title',default='',namespaces=ns).split())
         abstract=' '.join(e.findtext('a:summary',default='',namespaces=ns).split())
         version=url.rsplit('v',1)[-1] if url.rsplit('v',1)[-1].isdigit() else None
-        yield {'title':title,'year':int(pub[:4]),'published_at':pub[:10],
-          'arxiv_id':arxiv_norm(url), 'doi':None,
+        yield {'title':title,'year':int(pub[:4]) if pub[:4].isdigit() else None,
+          'published_at':pub[:10] or None, 'version_published_at':updated or None,
+          'arxiv_id':arxiv_norm(url), 'doi':e.findtext('arxiv:doi',default=None,namespaces=ns),
           'version_label': 'v'+version if version else None,
           'authors':[x.findtext('a:name',namespaces=ns) for x in e.findall('a:author',ns)],
-          'abstract':abstract,'url':url,'source_id':url,'source_payload':{'atom_entry_url':url}}
+          'abstract':abstract,'url':url,'source_id':url,
+          'source_payload':{'atom_entry_xml':ET.tostring(e,encoding='unicode')}}

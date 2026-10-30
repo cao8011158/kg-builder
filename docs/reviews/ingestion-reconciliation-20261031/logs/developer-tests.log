@@ -1,0 +1,53 @@
+$ PYTHONPATH=src python -m unittest discover -s tests -q
+----------------------------------------------------------------------
+Ran 6 tests in 0.260s
+
+OK
+{
+  "started_at": "2026-10-30T20:06:58.168460+00:00",
+  "completed_at": "2026-10-30T20:06:58.175951+00:00",
+  "mode": "api_first_page",
+  "since": "2025-01-01",
+  "until": "2026-10-30",
+  "per_query": 10,
+  "db_before": {
+    "papers": 0,
+    "versions": 0,
+    "extractions": 0,
+    "sources": 0
+  },
+  "db_after": {
+    "papers": 0,
+    "versions": 0,
+    "extractions": 0,
+    "sources": 0
+  },
+  "by_source": {},
+  "queries": [
+    {
+      "source": "openalex",
+      "topic": "memory",
+      "query": "term",
+      "received": 0,
+      "stored": 0,
+      "date_filtered": 0,
+      "unknown_date": 0,
+      "errors": []
+    },
+    {
+      "source": "arxiv",
+      "topic": "memory",
+      "query": "term",
+      "received": 0,
+      "stored": 0,
+      "date_filtered": 0,
+      "unknown_date": 0,
+      "errors": []
+    }
+  ],
+  "successful_queries": 2,
+  "failed_queries": 0
+}
+exit_code=0
+$ git diff --check
+exit_code=0

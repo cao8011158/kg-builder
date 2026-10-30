@@ -39,3 +39,11 @@ A stable `Paper` can link several `PaperVersion` records. If an upstream identif
 ### Sensitive/large files
 
 SQLite, scraped fulltext, credentials and manual review data are kept out of public Git. Store them in Drive with backups. Avoid downloading paywalled PDFs without rights. Do not run the optional LLM adapter or scheduled pipeline during this phase.
+
+## Identity, versions, and offline reconciliation
+
+The default `collect_papers.py --source all` queries OpenAlex and arXiv only. The optional Semantic Scholar adapter is selected only by explicitly passing `--source semantic_scholar`; historic records remain in SQLite. Metadata collection does not invoke the extraction API or scheduler.
+
+`papers.current_version_id` names a source-confirmed numeric `vN` version only. A NULL value on a metadata-only paper is intentional. To display its best available snapshot, call `preferred_metadata_version(connection, paper_id)` and show the metadata status, rather than asserting a verified current version. New metadata snapshots retain distinct source/content combinations. Confirmed `v10` remains current when a later `v2` arrives. DOI and arXiv identity resolution uses explicit source IDs, DOI aliases and recognized arXiv identifiers; title similarity never merges records.
+
+For historic databases, run `python scripts/reconcile_sqlite.py --input candidate.sqlite3 --input seed.sqlite3 --output reconciled.sqlite3 --report private-report.json` with new private output and report paths. The first input's paper IDs win in merged groups. Inputs are read-only; the output is built transactionally. The JSON report maps old paper/version IDs to canonical IDs and lists unresolved strong-ID conflicts. Every original row and payload is retained verbatim in `reconciliation_audit`, with relational extraction fields and active extraction JSON mapped to canonical IDs. `paper_redirects` persists the mapping; repeated reconciliation carries prior audit and redirect rows. Distinct metadata snapshots remain separate. Review unresolved conflicts before treating any ambiguous identities as one scholarly work. The tool copies the named ingestion tables; unrelated custom tables require a separate migration. Keep database and report private, outside Git.
