@@ -1,0 +1,2 @@
+CONTRIBUTION_DENSE {'results': [], 'next_offset': None}
+EXACT_LOOKUP_SQL ["SELECT entity_id FROM entities\n            WHERE kind='Method' AND name='Memory retrieval\nRetrieve memory' ORDER BY entity_id LIMIT 8"]

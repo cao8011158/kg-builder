@@ -25,6 +25,10 @@ def _json(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
 
 
+def _surface(value):
+    return ' '.join(value.split()).casefold()
+
+
 class SemanticStore:
     def __init__(self, path, model=None):
         self.path = Path(path)
@@ -55,6 +59,10 @@ class SemanticStore:
           name_origin TEXT NOT NULL, aliases_json TEXT NOT NULL, revision TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS entities_kind ON entities(kind,entity_id);
         CREATE INDEX IF NOT EXISTS entities_name ON entities(kind,name,entity_id);
+        CREATE TABLE IF NOT EXISTS entity_surfaces (
+          kind TEXT NOT NULL, normalized_name TEXT NOT NULL,
+          entity_id TEXT NOT NULL REFERENCES entities(entity_id),
+          PRIMARY KEY(kind,normalized_name,entity_id));
         CREATE TABLE IF NOT EXISTS reviews (review_id TEXT PRIMARY KEY, payload_hash TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY,value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS embedding_cache (
@@ -64,6 +72,12 @@ class SemanticStore:
         CREATE VIRTUAL TABLE IF NOT EXISTS contribution_fts USING fts5(contribution_id UNINDEXED,description);
         ''')
         self.db.commit()
+        # One-time migration for sidecars created before the exact alias directory.
+        if not self.db.execute("SELECT 1 FROM metadata WHERE key='entity_surfaces_v1'").fetchone():
+            with self.db:
+                for row in self.db.execute('SELECT entity_id,kind,name,aliases_json FROM entities'):
+                    self._insert_surfaces(row['entity_id'],row['kind'],row['name'],json.loads(row['aliases_json']))
+                self.db.execute("INSERT INTO metadata VALUES('entity_surfaces_v1','ready')")
         self.model = model
         self._indexes = {}
         self._index_model = None
@@ -72,6 +86,11 @@ class SemanticStore:
 
     def close(self):
         self.db.close()
+
+    def _insert_surfaces(self,eid,kind,name,aliases):
+        for surface in {name,*aliases}:
+            self.db.execute('INSERT OR IGNORE INTO entity_surfaces VALUES(?,?,?)',
+                            (kind,_surface(surface),eid))
 
     def _model_id(self):
         if self.model is None:
@@ -109,10 +128,17 @@ class SemanticStore:
             self._indexes.clear()
             self._index_model = model_id
         if kind not in self._indexes:
-            rows = self.db.execute('SELECT entity_id,name,description FROM entities WHERE kind=? ORDER BY entity_id',
-                                   (kind,)).fetchall()
-            vectors = self._embed([r['name'] + '\n' + r['description'] for r in rows])
-            self._indexes[kind] = HNSWIndex(dict(zip([r['entity_id'] for r in rows], vectors)), model_id=model_id)
+            if kind=='Contribution':
+                rows=self.db.execute('SELECT contribution_id,description FROM contributions ORDER BY contribution_id').fetchall()
+                ids=[r['contribution_id'] for r in rows]
+                texts=[r['description'] for r in rows]
+            else:
+                rows = self.db.execute('SELECT entity_id,name,description FROM entities WHERE kind=? ORDER BY entity_id',
+                                       (kind,)).fetchall()
+                ids=[r['entity_id'] for r in rows]
+                texts=[r['name'] + '\n' + r['description'] for r in rows]
+            vectors = self._embed(texts)
+            self._indexes[kind] = HNSWIndex(dict(zip(ids, vectors)), model_id=model_id)
             self.stats['dense_index_builds'] += 1
         return self._indexes[kind]
 
@@ -125,9 +151,10 @@ class SemanticStore:
             JOIN entities e ON e.entity_id=f.entity_id WHERE entity_fts MATCH ? AND e.kind=?
             ORDER BY bm25(entity_fts) LIMIT ?''',(expression,kind,limit))]
 
-    def _rank_entities(self, query, kind, limit):
-        exact=[r['entity_id'] for r in self.db.execute('''SELECT entity_id FROM entities
-            WHERE kind=? AND name=? ORDER BY entity_id LIMIT ?''',(kind,query.strip(),limit))]
+    def _rank_entities(self, query, kind, limit, surface_name=None):
+        exact=[r['entity_id'] for r in self.db.execute('''SELECT entity_id FROM entity_surfaces
+            WHERE kind=? AND normalized_name=? ORDER BY entity_id LIMIT ?''',
+            (kind,_surface(surface_name if surface_name is not None else query),limit))]
         sparse=self._sparse_entities(query,kind,max(100,limit))
         dense=[]
         if self.model:
@@ -137,6 +164,22 @@ class SemanticStore:
             for i,eid in enumerate(ranking):scores[eid]=scores.get(eid,0)+weight/(60+i+1)
         return sorted(scores,key=lambda eid:(-scores[eid],eid))[:limit],scores
 
+    def _rank_contributions(self, query, limit=100):
+        import re
+        terms=re.findall(r'[^\W_]+',query,flags=re.UNICODE)
+        sparse=[]
+        if terms:
+            expression=' OR '.join('"'+term.replace('"','')+'"' for term in terms[:16])
+            sparse=[r['contribution_id'] for r in self.db.execute('''SELECT contribution_id FROM contribution_fts
+                WHERE contribution_fts MATCH ? ORDER BY bm25(contribution_fts) LIMIT ?''',(expression,limit))]
+        dense=[]
+        if self.model:
+            dense=[h['id'] for h in self._index_for('Contribution').search(self._embed([query])[0],k=limit)]
+        scores={}
+        for ranking in (sparse,dense):
+            for i,cid in enumerate(ranking):scores[cid]=scores.get(cid,0)+1/(60+i+1)
+        return sorted(scores,key=lambda cid:(-scores[cid],cid))[:limit],scores
+
     def ingest(self, master_path, extraction_ids):
         """Import only explicitly chosen extractions, replacing changed sources atomically."""
         ids = list(extraction_ids)
@@ -145,6 +188,7 @@ class SemanticStore:
         master = sqlite3.connect(f'file:{Path(master_path).resolve().as_posix()}?mode=ro', uri=True)
         master.row_factory = sqlite3.Row
         imported = []
+        contribution_deltas=[]
         try:
             records = []
             for eid in ids:
@@ -171,6 +215,8 @@ class SemanticStore:
                         imported.append({'extraction_id': eid, 'status': 'unchanged'}); continue
                     # The source is replaced in one transaction; old decisions become invisible.
                     if previous:
+                        old_ids=[r['contribution_id'] for r in self.db.execute(
+                            'SELECT contribution_id FROM contributions WHERE extraction_id=?',(eid,))]
                         self.db.execute('DELETE FROM mentions WHERE extraction_id=?', (eid,))
                         self.db.execute('DELETE FROM contribution_fts WHERE contribution_id IN '
                                         '(SELECT contribution_id FROM contributions WHERE extraction_id=?)', (eid,))
@@ -193,10 +239,28 @@ class SemanticStore:
                         self.db.execute('INSERT INTO contributions VALUES(?,?,?,?,?)',
                                         (cid,eid,item['key'],item['description'],_json(item)))
                         self.db.execute('INSERT INTO contribution_fts VALUES(?,?)', (cid,item['description']))
+                        contribution_deltas.append((cid,item['description']))
+                    if previous:
+                        contribution_deltas.append((old_ids,None))
                     imported.append({'extraction_id': eid, 'status': 'replaced' if previous else 'added',
                                      'source_hash': source_hash})
         finally:
             master.close()
+        if self.model and self._index_model != self.model.model_id:
+            self._indexes.clear()
+        if contribution_deltas and 'Contribution' in self._indexes:
+            try:
+                index=self._indexes['Contribution']
+                for ids,description in contribution_deltas:
+                    if description is None:
+                        for cid in ids:index.delete(cid)
+                new=[(cid,description) for cid,description in contribution_deltas if description is not None]
+                vectors=self._embed([description for _,description in new])
+                for (cid,_),vector in zip(new,vectors):index.upsert(cid,vector)
+            except Exception:
+                self._indexes.pop('Contribution',None)
+                for result in imported:
+                    if result['status']!='unchanged':result['index_status']='rebuild_required'
         return imported
 
     def _pending(self, kind=None, limit=100, offset=0):
@@ -209,7 +273,7 @@ class SemanticStore:
 
     def _candidate(self, row, k=8):
         query = row['name']+'\n'+row['description']
-        ids,scores = self._rank_entities(query,row['kind'],k)
+        ids,scores = self._rank_entities(query,row['kind'],k,surface_name=row['name'])
         found = []
         for eid in ids:
             entity = self.db.execute('SELECT entity_id,kind,name,description,revision FROM entities WHERE entity_id=?',
@@ -327,6 +391,7 @@ class SemanticStore:
                      _json(e.get('aliases',[])),revision))
                 self.db.execute('INSERT INTO entity_fts VALUES(?,?,?,?)',
                     (eid,e['name'],e['description'],' '.join(e.get('aliases',[]))))
+                self._insert_surfaces(eid,e['kind'],e['name'],e.get('aliases',[]))
             for a in assignments:
                 if a['decision']!='pending':
                     self.db.execute('UPDATE mentions SET decision=?,entity_id=? WHERE mention_id=?',
@@ -396,13 +461,8 @@ class SemanticStore:
                 ids,ranking=self._rank_entities(query,entity_kind,100)
                 for eid in ids:scores[('entity',eid)]=ranking[eid]
         if kind in (None,'Contribution'):
-            import re
-            terms=re.findall(r'[^\W_]+',query,flags=re.UNICODE)
-            if terms:
-                expression=' OR '.join('"'+term.replace('"','')+'"' for term in terms[:16])
-                for rank,row in enumerate(self.db.execute('''SELECT contribution_id FROM contribution_fts
-                    WHERE contribution_fts MATCH ? ORDER BY bm25(contribution_fts) LIMIT 100''',(expression,))):
-                    scores[('contribution',row['contribution_id'])]=1/(60+rank+1)
+            ids,ranking=self._rank_contributions(query,100)
+            for cid in ids:scores[('contribution',cid)]=ranking[cid]
         found=[]
         for (typ,key),score in sorted(scores.items(),key=lambda pair:(-pair[1],pair[0])):
             if typ=='entity':

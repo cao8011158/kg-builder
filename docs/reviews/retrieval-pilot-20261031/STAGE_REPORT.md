@@ -44,3 +44,18 @@
 开发反馈修正：跨类型候选挤占、初始别名 LoCoMo/LOCOMO 同批关联、模型切换后的旧候选、索引更新失败后的同进程恢复。SQL 审阅已提交而索引更新失败时返回 rebuild_required，下一次查询重建受影响类型。分页有边界，初始聚类无静默固定上限。当前工作流定向 7/7、全套 54/54 通过（开发者证据），待主 Agent 在冻结提交独立复跑。
 
 已开始实际数据试验：主库副本导入 5 篇精简提取，未修改旧 40 条。初始 10 条问题使用 k=4、similarity=0.65、CPM resolution=0.1 时错误地得到单一大组；这是参数不合适，未作为最终语义归属。小样本阈值／分辨率对照已保存，后续需 LLM 检查拆分。付费 API 始终关闭。
+
+## 阶段 5：Batch 2 第 1/3 轮独立审阅：需要修改
+
+固定远端提交 `96b61e8ab2df74483d6e38acd928f7e54f2a8426`。已取回远端，核对与本地开发内容树一致。完整回归 54/54 通过；独立反例仍确认两个当前 batch 内 P2 缺口：
+
+- **SEM-01（P2，未关闭）**：`SemanticStore.search` 对 Contribution 只查询 FTS，没有 dense 路径。独立调用 `search('remember earlier conversations', kind='Contribution')` 对“A memory method”返回空，且编码器未参与。与每类语义内容可做 dense/sparse 检索的目标不符。修复：按贡献类型建立可复用 HNSW 缓存，新增／替换提取时局部维护或明确失效，融合 sparse+dense 结果；增加语义改写召回及相关／无关修改测试。
+- **SEM-02（P2，未关闭）**：`_candidate` 将 name+换行+description 传入 `_rank_entities`，精确匹配分支随后用整个串与 `entities.name` 比较，实际无法命中同名条目。源码跟踪证据 SQL：`name='Memory retrieval\nRetrieve memory'`。修复：分开传表面名称与语义查询；为规范化名称／别名建立索引，候选精确查询按类型直接定位，仍保留 sparse+dense 后续候选。
+
+证据：`logs/workflow-review1.log`、`logs/review1-counterexamples.log`。前述问题均处于首次实现的试验代码中，尚未合并或投入使用；本轮没有确认 P0/P1。允许开发子 Agent 按现有授权修复，保留此轮历史，第 2/3 轮复审检查原问题及根因变体。实际原文／向量试验继续准备，最终验收等待修复。
+
+## 阶段 6：Batch 2 修复 1 开发完成（未提交）
+
+SEM-01：贡献新增 dense HNSW 与 FTS 融合；源提取替换时只删除／更新受影响贡献的热索引，未变化源不重建。SEM-02：新增 `(kind, normalized_name, entity_id)` 表面形式索引，候选分别使用名称精确查询与描述语义查询，规范化名称／别名优先，保留 dense+sparse 候选。已处理已有 sidecar 的一次性索引迁移。
+
+开发者 workflow_development，定向 9/9、完整 56/56 通过；日志 `logs/workflow-fix1-targeted.log`、`logs/workflow-fix1-regression.log`。新增反例包含贡献语义改写、同进程源替换、无关写入复用、大小写别名与强相似干扰候选。主 Agent 已读取完整修改，下一步冻结修复提交并第 2/3 轮独立复审；开发自测不代替复审。

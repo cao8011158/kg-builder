@@ -18,7 +18,8 @@ class FakeModel:
     def encode(self,texts):
         if self.fail:raise RuntimeError('injected encoder failure')
         self.calls.extend(texts)
-        return [[1.,0.] if 'memory' in t.lower() else [0.,1.] for t in texts]
+        return [[1.,0.] if any(word in t.lower() for word in ('memory','remember','earlier'))
+                else [0.,1.] for t in texts]
 
 class SemanticTests(unittest.TestCase):
     def setUp(self):
@@ -82,7 +83,7 @@ class SemanticTests(unittest.TestCase):
         self.store.import_review({'schema_version':REVIEW_VERSION,'review_id':'r3','entities':[],
                                   'assignments':[match]})
         self.assertEqual(len(self.store.get_entity('rp:memory')['mentions']),2)
-        self.assertEqual(self.store.stats['dense_index_builds'],builds+2)
+        self.assertEqual(self.store.stats['dense_index_builds'],builds+3)
 
     def test_kind_first_candidate_and_alias_sparse(self):
         self.store.ingest(self.master,[self.eid])
@@ -98,6 +99,8 @@ class SemanticTests(unittest.TestCase):
                  'source_authored','["Memory retrieval"]','rev:method'))
             self.store.db.execute('INSERT INTO entity_fts VALUES(?,?,?,?)',
                 ('method:alias','Archival lookup','Retrieve memory','Memory retrieval'))
+            self.store.db.execute('INSERT INTO entity_surfaces VALUES(?,?,?)',
+                ('Method','memory retrieval','method:alias'))
         packet=self.packet('Method')
         self.assertIn('method:alias',[c['entity_id'] for c in packet['candidates']])
         self.assertTrue(all(c['kind']=='Method' for c in packet['candidates']))
@@ -106,6 +109,58 @@ class SemanticTests(unittest.TestCase):
         self.assertEqual(self.store.search('Memory retrieval',kind='ResearchProblem')['results'][0]['kind'],
                          'ResearchProblem')
         with self.assertRaises(ValueError):self.store.export_candidates(limit=101)
+
+    def test_contribution_dense_paraphrase_and_local_source_refresh(self):
+        self.store.ingest(self.master,[self.eid])
+        first=self.store.search('remember earlier conversations',kind='Contribution')
+        self.assertEqual(first['results'][0]['description'],'A memory method')
+        builds=self.store.stats['dense_index_builds']
+        other=copy.deepcopy(self.payload);other['extractor_version']='independent'
+        other['contributions'][0]['key']=self.version+'#c2'
+        other['contributions'][0]['description']='Unrelated benchmark claim'
+        other['research_problems']=[];other['methods']=[];other['benchmarks']=[]
+        second=ingest_extraction(self.db,other)
+        self.store.ingest(self.master,[second])
+        self.assertEqual(self.store.stats['dense_index_builds'],builds)
+        modified=copy.deepcopy(self.payload)
+        modified['contributions'][0]['description']='A completely different finding'
+        ingest_extraction(self.db,modified)
+        self.store.ingest(self.master,[self.eid])
+        self.assertEqual(self.store.stats['dense_index_builds'],builds)
+        self.assertNotIn('A memory method',[r['description'] for r in
+            self.store.search('remember earlier conversations',kind='Contribution')['results']])
+        self.assertIn('Unrelated benchmark claim',[r['description'] for r in
+            self.store.search('benchmark',kind='Contribution')['results']])
+
+    def test_exact_casefold_alias_beats_dense_distractor(self):
+        self.store.ingest(self.master,[self.eid])
+        method=self.packet('Method')
+        first={'schema_version':REVIEW_VERSION,'review_id':'exact-primary',
+               'entities':[{'entity_id':'method:primary','kind':'Method','name':'Memory retrieval',
+                            'description':'Retrieve memory','aliases':['LoCoMo']}],
+               'assignments':[self.assignment(method,'new_entity','method:primary')]}
+        self.store.import_review(first)
+        with self.store.db:
+            for i in range(20):
+                eid=f'method:distractor:{i}'
+                self.store.db.execute('INSERT INTO entities VALUES(?,?,?,?,?,?,?)',
+                    (eid,'Method','Memory pattern','Memory retrieval text','source_authored','[]',f'rev:{i}'))
+                self.store.db.execute('INSERT INTO entity_fts VALUES(?,?,?,?)',
+                    (eid,'Memory pattern','Memory retrieval text',''))
+                self.store.db.execute('INSERT INTO entity_surfaces VALUES(?,?,?)',
+                    ('Method','memory pattern',eid))
+        # Test the cold index after adding independent distractors in this test fixture.
+        self.store._indexes.pop('Method',None)
+        other=copy.deepcopy(self.payload);other['extractor_version']='exact-variant'
+        other['methods'][0]['name']='locomo';other['methods'][0]['key']='variant'
+        other['research_problems']=[];other['benchmarks']=[];other['contributions']=[]
+        eid=ingest_extraction(self.db,other);self.store.ingest(self.master,[eid])
+        candidate=self.store.export_candidates('Method')['mentions'][0]
+        self.assertEqual(candidate['candidates'][0]['entity_id'],'method:primary')
+        plan=self.store.db.execute('EXPLAIN QUERY PLAN SELECT entity_id FROM entity_surfaces '
+            'WHERE kind=? AND normalized_name=? ORDER BY entity_id LIMIT ?',
+            ('Method','locomo',8)).fetchall()
+        self.assertTrue(any('entity_surfaces' in str(tuple(r)) and 'INDEX' in str(tuple(r)) for r in plan))
 
     def test_changed_source_revokes_old_membership_and_stale_packet(self):
         self.store.ingest(self.master,[self.eid]);packet=self.packet()
