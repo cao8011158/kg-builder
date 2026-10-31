@@ -1,0 +1,20 @@
+# Manual entity resolution v0.2 candidate
+
+Status: **reviewer modeling, not a frozen ontology or verified scientific claim**. The v0.1 manifest and its single-ID decision/query behavior remain supported. The packaged [`entity_resolution_v0_2.json`](../src/kg_builder/schemas/entity_resolution_v0_2.json) adds outcome and hierarchy fields without changing the three SQLite resolution tables. Batches retain their declared schema version and original immutable manifest bytes.
+
+A v0.2 mention keeps `decision` as the storage state: `resolved` has one canonical `entity_id`; `pending` has none. Its required `review_outcome` explains the completed assessment:
+
+| Outcome | Decision | Canonical ID | Components | Meaning |
+| --- | --- | --- | --- | --- |
+| `mapped` | `resolved` | One matching-kind entity | Empty | Explicit single identity. |
+| `composite_label` | `pending` | NULL | At least two distinct Method or Artifact IDs | Method-shaped source label describes a compound procedure/system. Components are reviewed separately, not merged into one Method. |
+| `not_a_method` | `pending` | NULL | Empty | A Method-shaped source label is a taxonomy/category, not a Method identity. |
+| `insufficient_evidence` | `pending` | NULL | Empty | No mapping is justified yet. |
+
+The first three completed outcomes require valid source evidence anchors. A `composite_label` or `not_a_method` outcome applies only to a `/methods/N` mention. Every component must exist in the same batch, and a local component must belong to the reviewed source version. Ordinary `mapped` still requires matching Method/ResearchProblem/Artifact kind, Artifact subtype and source scope. A cross-kind Method plus Artifact composition is only represented in `component_entity_ids`, never by attaching a Method mention to an Artifact as its single canonical ID.
+
+ResearchProblem entities may declare unique `parent_problem_ids` with `relation_basis: reviewer_taxonomy`. All parents must be ResearchProblem entities in the same batch; self links, missing targets, cross-kind links and cycles are rejected at import. **Equivalence** requires the same research objective, inputs and material constraints. `SUBPROBLEM_OF` models a properly narrower objective or constraint set; shared topic words or superficial relevance do not imply equivalence or a parent edge. The hierarchy is a reviewer-authored candidate taxonomy, not an assertion that a paper claims that lineage. Method mechanisms and concrete Artifact systems/configurations remain distinct identities even when their names overlap.
+
+`get_resolution_mentions(con, batch_id, extraction_id)` continues to return the v0.1 shape for v0.1 batches. V0.2 rows additionally expose historical `review_outcome`, `component_entity_ids`, and `component_entities`. The latter contains active component payloads only if the mention and every component's support and ResearchProblem parent closure match pinned source bytes; otherwise it is empty with `stale: true`. `get_resolution_entity(con,batch_id,entity_id)` returns `{entity_id, stale, entity}` for an explicit ID and batch. Its active entity is hidden when its own support or any actual parent support is stale; missing IDs return `stale: true` and `entity: null`. Parent payloads are not recursively embedded. Both lookups use an indexed, consistent SQLite snapshot, reuse source/entity checks within the request and leave caller transactions under caller control. There is no implicit latest batch or registry-wide scan.
+
+The importer validates the entire v0.2 document and source hashes/evidence/graph constraints before its savepoint writes. A repeat of the same batch ID and semantic document is unchanged; a changed document with that ID fails. Reconciliation retains the same three tables and aborts if an annotated extraction ID or payload would change. Original Draft extraction records, review status, and previous v0.1 batches remain untouched. No LLM, network collector, scheduler, graph writer or embedding process runs in this layer.

@@ -9,8 +9,10 @@ import sqlite3
 from jsonschema import Draft202012Validator
 
 SCHEMA_VERSION='research-kg-entity-resolution/0.1'
-SCHEMA=json.loads(files('kg_builder.schemas').joinpath('entity_resolution_v0_1.json').read_text(encoding='utf-8'))
-VALIDATOR=Draft202012Validator(SCHEMA)
+SCHEMA_VERSION_V2='research-kg-entity-resolution/0.2'
+VALIDATORS={version:Draft202012Validator(json.loads(files('kg_builder.schemas').joinpath(name).read_text(encoding='utf-8')))
+            for version,name in ((SCHEMA_VERSION,'entity_resolution_v0_1.json'),
+                                 (SCHEMA_VERSION_V2,'entity_resolution_v0_2.json'))}
 FIELD_KIND={'methods':'Method','research_problems':'ResearchProblem','artifacts':'Artifact'}
 
 
@@ -21,9 +23,11 @@ def _load_json(raw):
 
 def validate_resolution_manifest(manifest):
     """Validate the complete declared profile, without reading or writing SQLite."""
-    if not isinstance(manifest,dict) or manifest.get('schema_version') != SCHEMA_VERSION:
+    if (not isinstance(manifest,dict) or
+        not isinstance(manifest.get('schema_version'),str) or
+        manifest['schema_version'] not in VALIDATORS):
         raise ValueError('Unknown entity resolution schema_version')
-    errors=sorted(VALIDATOR.iter_errors(manifest),key=lambda e:list(map(str,e.path)))
+    errors=sorted(VALIDATORS[manifest['schema_version']].iter_errors(manifest),key=lambda e:list(map(str,e.path)))
     if errors:
         err=errors[0]
         raise ValueError(f'Entity resolution schema at {list(err.path)}: {err.message}')
@@ -58,6 +62,39 @@ def _check_evidence(source, refs, paths):
             raise ValueError(f'Invalid evidence_locator_path: {path}')
 
 
+def _validate_problem_hierarchy(entities):
+    """Full manifest admission: validate a reviewer taxonomy in O(nodes + edges)."""
+    parents={}
+    for eid,entity in entities.items():
+        links=entity.get('parent_problem_ids',[])
+        if links and (entity['kind']!='ResearchProblem' or
+                      entity.get('relation_basis')!='reviewer_taxonomy'):
+            raise ValueError(f'Parent links require ResearchProblem reviewer_taxonomy: {eid}')
+        if entity['kind']!='ResearchProblem' and (
+            'parent_problem_ids' in entity or 'relation_basis' in entity):
+            raise ValueError(f'Parent links only belong to ResearchProblem: {eid}')
+        for parent in links:
+            if parent==eid or parent not in entities or entities[parent]['kind']!='ResearchProblem':
+                raise ValueError(f'Invalid parent ResearchProblem: {eid} -> {parent}')
+        parents[eid]=links
+    state={}
+    for root in parents:
+        if state.get(root)==2:continue
+        state[root]=1
+        stack=[(root,iter(parents[root]))]
+        while stack:
+            current,edges=stack[-1]
+            parent=next(edges,None)
+            if parent is None:
+                state[current]=2
+                stack.pop()
+            elif state.get(parent)==1:
+                raise ValueError(f'Cycle in ResearchProblem taxonomy: {parent}')
+            elif state.get(parent)!=2:
+                state[parent]=1
+                stack.append((parent,iter(parents[parent])))
+
+
 def _validate_sources(con,manifest):
     entities={}
     cache={}
@@ -82,6 +119,8 @@ def _validate_sources(con,manifest):
                 raise ValueError(f'Local entity support belongs to another version: {eid}')
             _check_evidence(source,[support['evidence_ref']] if 'evidence_ref' in support else [],
                             [support['evidence_locator_path']] if 'evidence_locator_path' in support else [])
+    if manifest['schema_version']==SCHEMA_VERSION_V2:
+        _validate_problem_hierarchy(entities)
     seen=set()
     for mention in manifest['mentions']:
         key=(mention['extraction_id'],mention['mention_path'])
@@ -103,6 +142,31 @@ def _validate_sources(con,manifest):
             raise ValueError(f'Mention surface/key differs from extraction: {key}')
         _check_evidence(source,mention['evidence_refs'],mention['evidence_locator_paths'])
         target=mention['entity_id']
+        if manifest['schema_version']==SCHEMA_VERSION_V2:
+            outcome=mention['review_outcome']
+            components=mention['component_entity_ids']
+            if outcome=='mapped':
+                if mention['decision']!='resolved' or target is None or components:
+                    raise ValueError(f'Inconsistent mapped outcome: {key}')
+            elif outcome=='composite_label':
+                if (mention['decision']!='pending' or target is not None or len(components)<2 or
+                    mention['kind']!='Method'):
+                    raise ValueError(f'Inconsistent composite_label outcome: {key}')
+                for component_id in components:
+                    component=entities.get(component_id)
+                    if not component or component['kind'] not in ('Method','Artifact'):
+                        raise ValueError(f'Invalid composite component: {component_id}')
+                    if (component['scope']=='paper_version_local' and
+                        component['scope_version_id']!=version):
+                        raise ValueError(f'Cross-version local component: {component_id}')
+            else:
+                if mention['decision']!='pending' or target is not None or components:
+                    raise ValueError(f'Inconsistent {outcome} outcome: {key}')
+                if outcome=='not_a_method' and mention['kind']!='Method':
+                    raise ValueError(f'not_a_method requires a Method source: {key}')
+            if outcome in ('composite_label','not_a_method') and not (
+                mention['evidence_refs'] or mention['evidence_locator_paths']):
+                raise ValueError(f'{outcome} needs source evidence: {key}')
         if mention['decision']=='pending':
             if target is not None: raise ValueError(f'Pending mention has entity_id: {key}')
             continue
@@ -142,7 +206,7 @@ def import_resolution_manifest(con,manifest,raw_json=None):
         else:
             _validate_sources(con,manifest)
             con.execute('INSERT INTO entity_resolution_batches VALUES(?,?,?,?,?,?)',
-                (manifest['batch_id'],SCHEMA_VERSION,manifest['reviewer'],manifest['reviewed_at'],digest,raw_json))
+                (manifest['batch_id'],manifest['schema_version'],manifest['reviewer'],manifest['reviewed_at'],digest,raw_json))
             for entity in manifest['entities']:
                 con.execute('INSERT INTO entity_resolution_entities VALUES(?,?,?,?,?,?)',
                     (manifest['batch_id'],entity['entity_id'],entity['kind'],entity['scope'],
@@ -173,6 +237,69 @@ def get_resolution_mentions(con,batch_id,extraction_id):
         raise
 
 
+def _entity_payload(con,batch_id,entity_id,cache):
+    if entity_id not in cache:
+        row=con.execute('''SELECT payload_json FROM entity_resolution_entities
+            WHERE batch_id=? AND entity_id=?''',(batch_id,entity_id)).fetchone()
+        cache[entity_id]=_load_json(row[0]) if row else None
+    return cache[entity_id]
+
+
+def _current_entity(con,batch_id,entity_id,entities,validity,hashes):
+    """Check only this entity's support and actual parent closure, with shared caching."""
+    if entity_id in validity:return validity[entity_id]
+    active=set()
+    own_valid={}
+    stack=[(entity_id,False)]
+    while stack:
+        eid,finished=stack.pop()
+        if finished:
+            active.remove(eid)
+            entity=entities[eid]
+            validity[eid]=own_valid[eid] and all(
+                validity.get(parent,False) for parent in entity.get('parent_problem_ids',[]))
+            continue
+        if eid in validity:continue
+        entity=_entity_payload(con,batch_id,eid,entities)
+        if entity is None:
+            validity[eid]=False
+            continue
+        active.add(eid)
+        current=True
+        for support in entity['support']:
+            sid=support['extraction_id']
+            if sid not in hashes:
+                row=con.execute('SELECT payload_json FROM extraction_records WHERE extraction_id=?',
+                                (sid,)).fetchone()
+                hashes[sid]=hashlib.sha256(row[0].encode('utf-8')).hexdigest() if row else None
+            if hashes[sid] != support['source_payload_sha256'].lower():
+                current=False
+        own_valid[eid]=current
+        stack.append((eid,True))
+        for parent in reversed(entity.get('parent_problem_ids',[])):
+            if parent in active:
+                own_valid[eid]=False  # Defensive for a damaged historical cycle.
+            elif parent not in validity:
+                stack.append((parent,False))
+    return validity[entity_id]
+
+
+def get_resolution_entity(con,batch_id,entity_id):
+    """Explicit indexed entity detail with current support and parent closure."""
+    con.execute('SAVEPOINT entity_resolution_read')
+    try:
+        entities={};validity={};hashes={}
+        current=_current_entity(con,batch_id,entity_id,entities,validity,hashes)
+        result={'entity_id':entity_id,'stale':not current,
+                'entity':entities.get(entity_id) if current else None}
+        con.execute('RELEASE SAVEPOINT entity_resolution_read')
+        return result
+    except BaseException:
+        con.execute('ROLLBACK TO SAVEPOINT entity_resolution_read')
+        con.execute('RELEASE SAVEPOINT entity_resolution_read')
+        raise
+
+
 def _get_resolution_mentions_snapshot(con,batch_id,extraction_id):
     """All source hashes are read from the same SQLite snapshot."""
     mention_rows=con.execute('''SELECT mention_path,decision,entity_id,source_payload_sha256,payload_json
@@ -183,38 +310,28 @@ def _get_resolution_mentions_snapshot(con,batch_id,extraction_id):
     source=con.execute('SELECT payload_json FROM extraction_records WHERE extraction_id=?',
                        (extraction_id,)).fetchone()
     current_hash=hashlib.sha256(source[0].encode('utf-8')).hexdigest() if source else None
-    entities={}
-    support_valid={}
-    support_hashes={extraction_id:current_hash}
+    entities={};validity={};support_hashes={extraction_id:current_hash}
     result=[]
     for path,decision,entity_id,pinned,raw in mention_rows:
         stale=(current_hash != pinned.lower())
         resolved=None
+        mention=_load_json(raw)
         if decision=='resolved' and not stale:
-            if entity_id not in entities:
-                row=con.execute('''SELECT payload_json FROM entity_resolution_entities
-                    WHERE batch_id=? AND entity_id=?''',(batch_id,entity_id)).fetchone()
-                entities[entity_id]=_load_json(row[0]) if row else None
-            entity=entities[entity_id]
-            if entity is None:
-                stale=True
-            else:
-                if entity_id not in support_valid:
-                    valid=True
-                    for support in entity['support']:
-                        sid=support['extraction_id']
-                        if sid not in support_hashes:
-                            source_row=con.execute('SELECT payload_json FROM extraction_records WHERE extraction_id=?',
-                                                   (sid,)).fetchone()
-                            support_hashes[sid]=(hashlib.sha256(source_row[0].encode('utf-8')).hexdigest()
-                                                 if source_row else None)
-                        if support_hashes[sid] != support['source_payload_sha256'].lower():
-                            valid=False
-                    support_valid[entity_id]=valid
-                stale=not support_valid[entity_id]
-                if not stale:
-                    resolved=entity
-        result.append({'batch_id':batch_id,'extraction_id':extraction_id,'mention_path':path,
+            stale=not _current_entity(con,batch_id,entity_id,entities,validity,support_hashes)
+            if not stale:resolved=entities[entity_id]
+        active_components=[]
+        if 'review_outcome' in mention and mention['review_outcome']=='composite_label' and not stale:
+            for component_id in mention['component_entity_ids']:
+                if not _current_entity(con,batch_id,component_id,entities,validity,support_hashes):
+                    stale=True
+            if not stale:
+                active_components=[entities[cid] for cid in mention['component_entity_ids']]
+        item={'batch_id':batch_id,'extraction_id':extraction_id,'mention_path':path,
                        'decision':decision,'entity_id':entity_id,'stale':stale,
-                       'entity':resolved,'mention':_load_json(raw)})
+                       'entity':resolved,'mention':mention}
+        if 'review_outcome' in mention:
+            item.update(review_outcome=mention['review_outcome'],
+                        component_entity_ids=mention['component_entity_ids'],
+                        component_entities=active_components)
+        result.append(item)
     return result
