@@ -1,0 +1,10 @@
+test_minimal_contract_and_rejections (test_retrieval_extraction.RetrievalTests.test_minimal_contract_and_rejections) ... ok
+test_optional_api_disabled (test_retrieval_extraction.RetrievalTests.test_optional_api_disabled) ... ok
+test_pinned_versions_and_atomic_mixed_batch (test_retrieval_extraction.RetrievalTests.test_pinned_versions_and_atomic_mixed_batch) ... ok
+test_reconcile_remaps_local_contribution_and_retains_prose (test_retrieval_extraction.RetrievalTests.test_reconcile_remaps_local_contribution_and_retains_prose) ... ok
+test_same_paper_versions_remain_independent (test_retrieval_extraction.RetrievalTests.test_same_paper_versions_remain_independent) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.088s
+
+OK

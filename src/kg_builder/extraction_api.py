@@ -1,20 +1,21 @@
-"""Optional OpenAI-compatible extraction adapter. NOT EXECUTED, NOT TESTED.
-
-The API response is only a *draft* and requires schema/evidence review.
-"""
+"""Optional OpenAI-compatible extraction adapter; disabled by default."""
 from __future__ import annotations
 import json
 import os
-from .collectors import fetch_bytes
-from urllib.parse import urljoin
+from .extraction_validation import RETRIEVAL_SCHEMA_VERSION, validate_extraction
 from urllib.request import Request, urlopen
 
-EXTRACTION_INSTRUCTIONS = '''Return a JSON object with paper_id, version_id,
-summary, methods (list), research_problems (list), findings (list),
-evaluations (list), artifacts (list), evidence_locators (list).
-For every assertion, include exact source locator and distinguish author claims
-from verified facts. If the abstract does not specify a metric or benchmark,
-leave the field empty. Do not invent. This output must be reviewed before import.'''
+EXTRACTION_INSTRUCTIONS = '''Return only a JSON object for research-kg-extraction/0.3-retrieval.
+Include schema_version, paper_id, version_id, paper_version with version_label
+(vN or null for an unverified snapshot) and source_url, and four arrays:
+contributions [{key,description}], research_problems [{key,name,description}],
+methods [{key,name,description,role}], benchmarks
+[{key,name,description,roles,version_or_subset}]. A contribution is an
+author-claimed contribution, and its key starts with version_id followed by #.
+Method role is proposed, used, or involved. Benchmark roles are introduced
+and/or used; version_or_subset is a string or null. Include optional section
+and source_url on individual entries where known. Use empty arrays for absent
+information, do not invent details, and do not include other fields.'''
 
 class OptionalLLMExtractor:
     def __init__(self, base_url, model, enabled=False):
@@ -34,6 +35,15 @@ class OptionalLLMExtractor:
           'Authorization':'Bearer '+key,'Content-Type':'application/json'})
         with urlopen(req,timeout=120) as response: body=json.load(response)
         draft=json.loads(body['choices'][0]['message']['content'])
+        if not isinstance(draft,dict):
+            raise ValueError('LLM extraction must be a JSON object')
+        if draft.get('schema_version') != RETRIEVAL_SCHEMA_VERSION:
+            raise ValueError('LLM extraction schema_version differs from requested contract')
+        if draft.get('paper_id') != paper_id or draft.get('version_id') != version_id:
+            raise ValueError('LLM extraction paper/version differs from supplied IDs')
         draft['status']='draft_requires_review'
         draft['extractor_type']='llm_api_unreviewed'
+        draft['extractor_version']=self.model
+        draft['source_scope']='supplied_paper_text'
+        validate_extraction(draft)
         return draft
