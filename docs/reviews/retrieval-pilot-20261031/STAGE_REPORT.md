@@ -1,6 +1,6 @@
 # 精简研究知识图谱：实现与首轮试验
 
-状态：开发中；LLM API 保持关闭。
+状态：第一版与六篇论文试验完成；Batch 1 第 1 轮通过，Batch 2 第 2 轮通过；LLM API 保持关闭，未合并 main。
 
 ## 任务边界与基线
 
@@ -59,3 +59,39 @@
 SEM-01：贡献新增 dense HNSW 与 FTS 融合；源提取替换时只删除／更新受影响贡献的热索引，未变化源不重建。SEM-02：新增 `(kind, normalized_name, entity_id)` 表面形式索引，候选分别使用名称精确查询与描述语义查询，规范化名称／别名优先，保留 dense+sparse 候选。已处理已有 sidecar 的一次性索引迁移。
 
 开发者 workflow_development，定向 9/9、完整 56/56 通过；日志 `logs/workflow-fix1-targeted.log`、`logs/workflow-fix1-regression.log`。新增反例包含贡献语义改写、同进程源替换、无关写入复用、大小写别名与强相似干扰候选。主 Agent 已读取完整修改，下一步冻结修复提交并第 2/3 轮独立复审；开发自测不代替复审。
+
+## 阶段 7：Batch 2 第 2/3 轮独立审阅：通过
+
+固定远端修复提交 `8cf48517026e95f27b6ba637c503675fac4c7d4d`；已重新取回并核对本地代码树一致。主 Agent 检查完整 Batch 2 与修复差异，独立复跑 56/56，通过。SEM-01、SEM-02 均已关闭；真实模型下贡献语义检索有结果，`LOCOMO`／`a-mem` 别名准确优先返回相应共享节点。事务、陈旧候选、模型切换、热索引更新失败、贡献源替换等回归均通过。无新增阻塞缺陷。
+
+原始日志：`logs/workflow-review2.log`。独立真实数据与局部性检查：`independent_acceptance.py`、`logs/independent-acceptance.log`。实际 SQLite EXPLAIN QUERY PLAN 从 entity 主键定位，经 mentions_entity 索引扩展，再通过 source 主键定位；每次 detail 读取 4 行、935 字节，回复 1570 字节，97 VM 指令。加入 500 个无关实体及约 10 MB 描述后这些计数不变；未知 ID 只做一次主键查询。真实 warm 同查询新增建索引 0、编码 0。
+
+边界：详情／搜索按记录数分页，尚未实施任意超长单字段的严格回复字节预算；当前实际提取为简短描述。SQLite VM 指令是实际执行工作代理，应用取回字节不等于底层磁盘页读取字节；未提供伪造的磁盘 IO 计数。500 个随机 32d 向量的 20 次 Top10 ANN 对照召回为 1.0，仅证明此合成样本，不代表实际语料检索质量或大规模能力。首次按类型重建 HNSW 为必要冷 O(N)，不是每次查询的成本。
+
+## 阶段 8：真实论文首轮与增量验收：通过
+
+初始论文 A-Mem、Mem0、ACE、Acon、SkillWeaver；新增论文 MemSkill。均为 2025-01-01 起且实质属于三个方向；主 Agent 阅读实际原文的方法／设置部分并手动提取，没有调用 LLM API。新增共 6 条提取；主库仍 365 篇，历史 40 条提取 payload 原样保留，现 46 条。
+
+初始 10 条问题：原始阈值 .65／resolution .1 导致大组，保留失败记录；对照后采用 k=4、阈值 .8、CPM resolution .4、seed42 产生 5 个候选社区。语义检查后整理为 7 个共享研究问题：分开技能获得与技能改进、记忆召回与维护、信息保留与策略积累。原始描述和候选社区均保留，未声称这些参数已完成普适校准。
+
+初始审阅：22 个共享节点、28 个原始描述关联。MemSkill 增量：9 个新描述，其中 5 个匹配已有节点，4 个新建（MemSkill、ALFWorld、HotpotQA、LongMemEval）；7 个问题组未重聚类。热类型索引构建数 3→3，新增节点局部 upsert。最终 6 个来源、37 个原始描述、26 个共享节点（7 问题／8 方法／11 benchmark）、6 条独立贡献。LoCoMo 和 A-Mem 均正确扩展到 3 篇论文；Mem0 与图变体保持不同身份。
+
+检查：重复审阅 unchanged；全部待处理候选已处理；基于名称、语义的检索返回共享节点并扩展至论文／版本／原文链接。`PRAGMA integrity_check` 为 ok。尚不代表全库重筛、Agent benchmark 评测或 Neo4j 部署完成；自动拆分／合并、跨进程热索引协调和规范实体编辑界面不属于本轮试验。当前 sidecar 是显式 ingest 后的快照，主库变化需再次 ingest 对应 extraction ID。接下来完成安装／保存／下载恢复验收。
+
+## 阶段 9：安装、保存与下载恢复验收：通过
+
+从冻结实现构建 wheel，在独立目标目录安装；离开源码目录，通过安装后的包与 CLI 对真实 sidecar 查询成功。见 `logs/package-build.log`、`logs/package-install.log`、`logs/package-probe.log`、`logs/installed-cli.log`。
+
+已先备份原始主库，再保存包含 6 条新提取和 6 条当前 scope 审阅的主库；另保存语义 sidecar、精简提取 JSON 与包含来源、审阅、聚类、校准、结果和哈希清单的恢复包。数据库使用 SQLite backup API 一致导出。已从保存位置实际下载主库、sidecar、恢复包，三者 SHA-256 与本地逐一相同；ZIP 全项校验和数据库 integrity_check 均通过。解包后用安装的代码再次查询 LoCoMo，正确返回 3 篇关联论文；A-Mem 关联与 26 个共享节点均恢复。见 `logs/roundtrip-restored-query.log` 和 `roundtrip_validation.json`。
+
+保存主库 SHA-256：`18327a70df279fbdba13088d715cca75ffeb451a4e78164e3da2a7981c7064d0`。语义 sidecar：`66d9ab85ed074bd610207593497c252a19d6f979b05df7e821f67e166b494ef9`。恢复包：`53de779a2c753da1e8d7a1e9bdc969971bfa9e57094df9d39b2f20680374074b`。
+
+模型为 CPU 本地 BAAI/bge-small-en-v1.5，FastEmbed 0.9.1，384 维；所用 ONNX 仓库修订 `aa8f8b060edb00e03bfdd08813a2949946c8ba55` 已记入恢复清单，缓存向量随 sidecar 保存。LLM 提取及语义判断均由主 Agent 完成，API 接口保留但全程未调用。
+
+## 最终交付与剩余范围
+
+本 step 的精简 schema、代码流水线、独立审阅和六篇论文功能试验已完成；实现保存在 `work/retrieval-pilot-20261031`，未合并 main。两个已确认 P2 缺口已在第 2/3 轮复审关闭。旧失败与环境故障记录保留。
+
+尚未进行：365 篇全库重新筛选／提取、检索质量与 Agent 对照评测、生产参数标定、自动拆分合并、Neo4j 写入／部署、定时任务启动、跨进程热索引协调或规范实体编辑界面。当前问题代表使用组名／定义向量，不会自动改写为全体成员均值；更新定义／拆分合并留待明确维护操作。
+
+记录检查：`batch.json` 保存提交、角色、两轮审阅、已关闭问题与真实日志哈希。当前云 Skill 未提供可读取的 check_gate.py（读取失败）；未执行或声称官方 gate 为 READY。主 Agent 已逐项核对证据一致性，本轮不进行合并。

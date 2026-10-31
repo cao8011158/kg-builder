@@ -1,0 +1,17 @@
+{
+  "master": {
+    "size": 10104832,
+    "sha256": "18327a70df279fbdba13088d715cca75ffeb451a4e78164e3da2a7981c7064d0",
+    "matches": true
+  },
+  "semantic": {
+    "size": 688128,
+    "sha256": "66d9ab85ed074bd610207593497c252a19d6f979b05df7e821f67e166b494ef9",
+    "matches": true
+  },
+  "bundle": {
+    "size": 2206126,
+    "sha256": "53de779a2c753da1e8d7a1e9bdc969971bfa9e57094df9d39b2f20680374074b",
+    "matches": true
+  }
+}

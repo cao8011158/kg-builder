@@ -1,0 +1,118 @@
+{
+  "master": {
+    "historical_payloads_unchanged": 40,
+    "current_extractions": 46,
+    "papers": 365,
+    "integrity": "ok"
+  },
+  "counts": {
+    "sources": 6,
+    "mentions": 37,
+    "entities": 26,
+    "contributions": 6
+  },
+  "warm_reuse": {
+    "same_results": true,
+    "index_build_delta": 0,
+    "embedding_compute_delta": 0
+  },
+  "locality": {
+    "measurements": [
+      {
+        "label": "cold_detail",
+        "fetched_rows": 4,
+        "fetched_bytes": 935,
+        "sqlite_vm_opcodes": 97,
+        "reply_bytes": 1570,
+        "seconds": 0.00011008200090145692,
+        "plans": [
+          [
+            3,
+            0,
+            39,
+            "SEARCH entities USING INDEX sqlite_autoindex_entities_1 (entity_id=?)"
+          ],
+          [
+            10,
+            0,
+            62,
+            "SEARCH m USING INDEX mentions_entity (entity_id=?)"
+          ],
+          [
+            17,
+            0,
+            46,
+            "SEARCH s USING INDEX sqlite_autoindex_sources_1 (extraction_id=?)"
+          ]
+        ]
+      },
+      {
+        "label": "hot_detail",
+        "fetched_rows": 4,
+        "fetched_bytes": 935,
+        "sqlite_vm_opcodes": 97,
+        "reply_bytes": 1570,
+        "seconds": 6.76199997542426e-05,
+        "plans": [
+          [
+            3,
+            0,
+            39,
+            "SEARCH entities USING INDEX sqlite_autoindex_entities_1 (entity_id=?)"
+          ],
+          [
+            10,
+            0,
+            62,
+            "SEARCH m USING INDEX mentions_entity (entity_id=?)"
+          ],
+          [
+            17,
+            0,
+            46,
+            "SEARCH s USING INDEX sqlite_autoindex_sources_1 (extraction_id=?)"
+          ]
+        ]
+      },
+      {
+        "label": "500_unrelated_entities_10MB",
+        "fetched_rows": 4,
+        "fetched_bytes": 935,
+        "sqlite_vm_opcodes": 97,
+        "reply_bytes": 1570,
+        "seconds": 0.00028266799927223474,
+        "plans": [
+          [
+            3,
+            0,
+            39,
+            "SEARCH entities USING INDEX sqlite_autoindex_entities_1 (entity_id=?)"
+          ],
+          [
+            10,
+            0,
+            62,
+            "SEARCH m USING INDEX mentions_entity (entity_id=?)"
+          ],
+          [
+            17,
+            0,
+            46,
+            "SEARCH s USING INDEX sqlite_autoindex_sources_1 (extraction_id=?)"
+          ]
+        ]
+      }
+    ],
+    "missing_id_queries": 1,
+    "internal_reading_measured": true,
+    "large_requested_single_record_byte_budget": "not enforced; limits bound record count, not arbitrary imported field length"
+  },
+  "ann_validation": {
+    "vectors": 500,
+    "dimensions": 32,
+    "queries": 20,
+    "k": 10,
+    "mean_recall": 1.0,
+    "scope": "synthetic validation only; not corpus retrieval quality"
+  }
+}
