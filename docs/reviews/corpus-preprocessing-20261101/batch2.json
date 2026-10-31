@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "batch_id": "corpus-preprocessing-20261101-batch2",
+  "repository": "cao8011158/kg-builder",
+  "branch": "work/retrieval-pilot-20261031",
+  "base_sha": "95eb1f95fa9a06621ab0f39302a9dfed1a5346e8",
+  "head_sha": "9ac0a1184f687837cd1bd9380a967c0c50ff0a74",
+  "target_branch": "main",
+  "target_sha": "fc114851d5017aed7c8d5477b58b2ff8dac6bbfa",
+  "implementation_actor": "corpus_data_team",
+  "merge_authorized": false,
+  "authorization_reference": "User authorized three data preprocessing batches, no main merge requested.",
+  "scope": [
+    "122 fixed candidates;71 new four-field extractions;213 incremental semantic decisions"
+  ],
+  "acceptance_criteria": [
+    "122 exact scope decisions",
+    "71 valid new extractions",
+    "213 independent semantic assignments and preserved original source/item hashes",
+    "62 tests; actual current-corpus retrieval; idempotence"
+  ],
+  "feature_complete": true,
+  "scale_required": false,
+  "tests": [
+    {
+      "role": "developer",
+      "kind": "targeted",
+      "head_sha": "9ac0a1184f687837cd1bd9380a967c0c50ff0a74",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_corpus_batch.py",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/batch2-fixed-head-developer-targeted.log",
+      "log_sha256": "dfa67b3fc4bffacaef4514f5c1c4b54a1f1369f4ce08e2f3402f8a6be5f76b25"
+    },
+    {
+      "role": "developer",
+      "kind": "fast_regression",
+      "head_sha": "9ac0a1184f687837cd1bd9380a967c0c50ff0a74",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/batch2-fixed-head-developer-full.log",
+      "log_sha256": "f27c9e0dde012992d6d06b895b60eec1be6e23bd4a97745860686d671c3ded5c"
+    },
+    {
+      "role": "reviewer",
+      "kind": "fast_regression",
+      "head_sha": "9ac0a1184f687837cd1bd9380a967c0c50ff0a74",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/batch2-fixed-head-regression.log",
+      "log_sha256": "6606a1f9d9c3474461ab20ce332b15e7ea9570c5a1957d942ac012a1b547c645"
+    },
+    {
+      "role": "reviewer",
+      "kind": "feature_acceptance",
+      "head_sha": "9ac0a1184f687837cd1bd9380a967c0c50ff0a74",
+      "command": [
+        "python",
+        "docs/reviews/corpus-preprocessing-20261101/audit_corpus.py",
+        "--through",
+        "2"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/batch2-independent-data-audit.log",
+      "log_sha256": "240069f7eed8368b02c340c34a585abb4a77ea2b58cf5518587263f4bc0716ec"
+    }
+  ],
+  "reviews": [
+    {
+      "round": 1,
+      "head_sha": "9ac0a1184f687837cd1bd9380a967c0c50ff0a74",
+      "remote_head_sha": "9ac0a1184f687837cd1bd9380a967c0c50ff0a74",
+      "actor": "root plus independent semantic reviewer",
+      "verdict": "pass",
+      "counterexample_note": "122 blind scope checks;71 field reviews;213/213 semantic assignment audit. Full old-metadata/payload and per-item/source-hash audit, indexed detail reads, actual hybrid queries, repeat import zerochanges. Pending scope item is explicitly not extracted."
+    }
+  ],
+  "findings": []
+}

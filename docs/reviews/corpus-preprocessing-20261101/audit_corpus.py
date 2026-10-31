@@ -29,6 +29,15 @@ old_records = {r['extraction_id']:r['payload_json'] for r in baseline.execute('S
 for eid,raw in old_records.items():
     assert master.execute('SELECT payload_json FROM extraction_records WHERE extraction_id=?',(eid,)).fetchone()[0] == raw
 print('ORIGINAL_METADATA_AND_PAYLOADS_UNCHANGED',len(old_records))
+for table_row in baseline.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"):
+    table=table_row[0]
+    assert table.replace('_','').isalnum()
+    old_rows={tuple(r) for r in baseline.execute('SELECT * FROM '+table)}
+    current_rows={tuple(r) for r in master.execute('SELECT * FROM '+table)}
+    assert old_rows <= current_rows, f'Historical rows removed or changed: {table}'
+    if table not in ('extraction_records','relevance_reviews'):assert old_rows==current_rows,table
+print('ALL_HISTORICAL_MASTER_ROWS_PRESERVED')
+
 seen=set(); includes=set(); total_new=0
 for b in range(1,a.through+1):
     inp, reviews, ext = [load(f'batch{b}-{k}.json') for k in ('input','reviews','extractions')]

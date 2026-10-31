@@ -123,6 +123,44 @@
       "exit_code": 0,
       "log": "logs/batch1-round2-data-audit.log",
       "log_sha256": "bf554f88d31544683b88baa1749e0bdca0e7fcc331fd8d82ff59f96355a2a761"
+    },
+    {
+      "role": "developer",
+      "kind": "targeted",
+      "head_sha": "95eb1f95fa9a06621ab0f39302a9dfed1a5346e8",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_corpus_batch.py",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/batch2-developer-targeted.log",
+      "log_sha256": "36ae67ce8b1ac1d05bb586c42d68039ebb092946b5ebf4ee721161ef8cafaafa"
+    },
+    {
+      "role": "developer",
+      "kind": "fast_regression",
+      "head_sha": "95eb1f95fa9a06621ab0f39302a9dfed1a5346e8",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/batch2-developer-full.log",
+      "log_sha256": "a662b5e404bef4a52be3ef6322e9f0de1246aefc63f5fa8b5e2f9b2f838eebef"
     }
   ],
   "reviews": [

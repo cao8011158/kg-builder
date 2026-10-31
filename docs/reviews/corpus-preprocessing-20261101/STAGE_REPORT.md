@@ -1,6 +1,6 @@
 # 全候选池预处理：三个 batch
 
-状态：Batch 1 已通过第 1 轮正式审阅；Batch 2 开发完成，正在独立复核；本 step 尚未完成。
+状态：Batch 1 已通过第 2 轮、Batch 2 已通过第 1 轮正式审阅；即将进入 Batch 3，本 step 尚未完成。
 
 ## 固定范围与权限
 
@@ -90,3 +90,37 @@ part1 开发者 corpus_b1_part1 检查 61 条，36 include／25 exclude；part2 
 corpus_resolution 完成 11 个候选包、213 条明确判断：56 条匹配，157 条新建归属对应 156 个新 canonical 实体，0 pending。当前语义库共 129 来源／412 描述关联／295 实体。保留 FOCUS 与旧 Focus 的不同机制身份，也区分不同 SWE、Mind2Web 评测对象；LongMemEval-S 的原始子集保留在 mention。所有决定、候选和来源指纹均留在私有证据包。
 
 corpus_batch_runner 在实际提交 95eb1f95fa9a06621ab0f39302a9dfed1a5346e8 上复跑 6 项定向和 62 项快速全仓测试，均 exit 0；原始日志已收录当前仓库 evidence/logs。当前还需固定远端新提交及 batch2-data-receipt.json，再独立检查累计数据、幂等、当前规模检索和恢复检查点。本批尚未宣告正式 review 通过。
+
+## Batch 2 — 第 1/3 轮正式独立审阅：通过
+
+固定远端提交 `9ac0a1184f687837cd1bd9380a967c0c50ff0a74`，取回并核对 tree；main 实际仍为 fc114851d5017aed7c8d5477b58b2ff8dac6bbfa。开发者与主 Agent 分别复跑该提交 62 项全仓测试，另 6 项定向通过。独立 scope、71 份字段及 213/213 语义决定均完成；未发现已确认误合并或明显漏合并。
+
+独立累计审计覆盖 244 条清单，原始 papers／paper_versions 和旧 46 个 extraction payload 不变；412 个 mention 原始 item／hash／来源指纹及归属类型一致。语义库 129 来源、412 描述、295 节点（98 问题／120 方法／77 benchmark）；SAGE 三份来源关联同一方法。SAGE／CAT／LoCoMo 的实际混合查询和索引明细读取通过；重复导入 master_new=0、sidecar_imported=0。
+
+检查点解包后逐文件 hash 及四个 SQLite integrity_check 均通过，ZIP SHA-256 `70fba7bed2b8c23a57986b5ddb2f499712574fe8ca845fc5e0b20afc368554d6`，已保存。合并 gate 唯一 BLOCKED 项仍是未授权 main 合并，不影响本轮已授权数据处理。有效本批结果 71 include／50 exclude／1 pending，进入最后 Batch 3 的 121 条。
+
+## Batch 3 — 已启动
+
+最后 121 条固定清单分为 61／60 两片；两个开发者与独立盲读 Agent 已开始逐篇检查。前两批已验收，不重新执行；仍只在工作副本追加数据。最后一批完成后执行整池 365 条覆盖、恢复、真实当前规模和无关数据扩容局部性验收，再更新既有保存文件。
+
+## 补充功能探针（Batch 2 当前规模，无新增正式轮次）
+
+在 129 来源／295 实体的真实副本上，贡献混合检索重复结果一致，热调用新增向量计算和索引构建均为 0。LoCoMo 明细真实读取 5 行／1353 字节、113 个 SQLite VM 操作；加入 500 个无关实体及约 10MB 文本后，读取行数、字节、返回体与 VM 操作均不变，实际计划无全表 SCAN。该探针只使用一次性 SQLite 备份，未污染正式 sidecar。最终将以完整 Batch 3 后的数据再执行功能验收。
+
+## Batch 3 — 两个分片开发完成
+
+part1 检查 61 条，28 include／33 exclude，28 新提取；part2 检查 60 条，17 include／42 exclude／1 pending，17 新提取。开发者分别完成全部清单覆盖、v0.3 schema、主题及精确版本/source pin 自检。合计当前 45 include／75 exclude／1 pending，尚未入库或正式验收。
+
+Research Square compaction-pay 仍只有标题且来源不可访问，保留 pending。Hebbian／Kairos 从实际 primary PDF 选定章节提取；本地存量年份为 2025，CEUR 相关发表版可核实为 2026-02-07，但最早公开具体日期和 OpenReview／CEUR 版本等同关系未证实，review 明确 stored_year_unverified_first_public_date，原始 first_published 仍为空，未补造日期或重写原文。主 Agent 实际打开 CEUR PDF 验证标题、作者和 LLM agent 记忆机制支持，独立复核继续检查全部 121 条与 45 份字段。
+
+## Batch 3 — 范围裁决、字段独立复核与提交前验证完成
+
+独立盲读全部 121 条后，主 Agent 对照原始摘要逐项裁决。排除新增误纳入的 restart-monitor（压缩仅为决策充分性的例子）、world-model compaction（未建立实际 LLM agent 角色）与 Traversal（正文实验为 Transformer-XL／PPO MiniGrid）。保留原有 PREreview、路由蒸馏、critic RL、静态技能攻击及通用视频对话 QA 排除，未仅凭 compaction／skill／memory 词汇放宽范围。两片原始结果及修正结果分开保存。
+
+当前有效 42 include／78 exclude／1 pending；42 新提取。独立 Agent 已检查原先全部 45 份字段，移除三条 out-of-scope 后的全部 42 份无未解决字段问题；确认命名方法、评测资源角色和组件 involved 标记。corpus_batch_runner 在实际 HEAD 9ac0a1184f687837cd1bd9380a967c0c50ff0a74 复跑 6 项定向与 62 项全仓回归均 exit 0。下一步入库及增量语义整理，尚未正式验收。
+
+## Batch 3 — 语义整理完成，准备最终正式审阅
+
+corpus_resolution 完成 7 个候选包、126 条判断：28 条匹配，98 个新实体，0 pending。当前完整语义库 171 个来源、538 个源描述关联、393 个实体（132 ResearchProblem、157 Method、104 Benchmark）、171 条论文内贡献。Kairos 的方法节点保留实际来源说明，没有推断论文版本或发布日期。Terminal-Bench 等明确编号发布版保持区分。
+
+主 Agent 已读取全部本批目标归属及定义，当前未确认误合并；完整预审检查覆盖 365 个不重叠候选、165 新提取与 6 复用、全部旧主库行保留、所有 mention 原始 item／hash／source fingerprint 和实体类型、真实混合查询及明细索引，均通过。已导出 365 条有效筛选、171 份精简提取和共享实体 JSON。当前有效总计 171 include／192 exclude／2 pending；尚需固定远端新 head 后正式复跑、完整规模／恢复及持久化验收。
