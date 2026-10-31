@@ -13,8 +13,10 @@ from kg_builder.extraction_validation import validate_extraction
 
 TABLES = ('papers', 'paper_versions', 'source_records', 'paper_topics',
           'discovery_hits', 'extraction_records', 'pipeline_runs',
-          'paper_doi_aliases', 'relevance_reviews')
-OPTIONAL_TABLES = {'paper_doi_aliases','relevance_reviews','reconciliation_audit','paper_redirects'}
+          'paper_doi_aliases', 'relevance_reviews', 'entity_resolution_batches',
+          'entity_resolution_entities', 'entity_resolution_mentions')
+OPTIONAL_TABLES = {'paper_doi_aliases','relevance_reviews','reconciliation_audit','paper_redirects',
+                   'entity_resolution_batches','entity_resolution_entities','entity_resolution_mentions'}
 
 
 def rows(db, table):
@@ -289,7 +291,7 @@ def reconcile(inputs, output, report):
                     for table in TABLES:
                         for index,row in enumerate(d[table]):
                             original_pid = row.get('paper_id')
-                            original_vid = row.get('version_id')
+                            original_vid = row.get('version_id') or row.get('scope_version_id')
                             save_audit(hashes[i],table,index,json.dumps(row,ensure_ascii=False,sort_keys=True),
                                        mapping.get((i,original_pid)) if original_pid else None,
                                        version_map.get((i,original_vid)) if original_vid else None)
@@ -305,6 +307,45 @@ def reconcile(inputs, output, report):
                                 save_redirect(prior['input_sha256'],prior['original_paper_id'],target)
                     except sqlite3.OperationalError:
                         pass
+                # A resolution pins exact extraction bytes and IDs. If reconciliation
+                # changes either, leave the historical input untouched and fail closed.
+                for i,d in enumerate(datasets):
+                    if not d['entity_resolution_batches']:
+                        continue
+                    originals={e['extraction_id']:e for e in d['extraction_records']}
+                    annotated={m['extraction_id'] for m in d['entity_resolution_mentions']}
+                    for entity in d['entity_resolution_entities']:
+                        if entity['scope_version_id'] and version_map.get((i,entity['scope_version_id'])) != entity['scope_version_id']:
+                            raise ValueError('Annotated local entity version would change during reconciliation')
+                        annotated.update(s['extraction_id'] for s in json.loads(entity['payload_json'])['support'])
+                    for eid in annotated:
+                        original=originals.get(eid)
+                        current=out.execute('''SELECT paper_id,version_id,payload_json FROM extraction_records
+                            WHERE extraction_id=?''',(eid,)).fetchone()
+                        if (not original or not current or
+                            (original['paper_id'],original['version_id'],original['payload_json']) != tuple(current)):
+                            raise ValueError('Annotated extraction ID or payload would change during reconciliation')
+                    for batch in d['entity_resolution_batches']:
+                        vals=tuple(batch.values())
+                        existing=out.execute('SELECT * FROM entity_resolution_batches WHERE batch_id=?',
+                                             (batch['batch_id'],)).fetchone()
+                        if existing and tuple(existing) != vals:
+                            raise ValueError('Conflicting immutable entity resolution batch_id')
+                        if not existing:
+                            out.execute('INSERT INTO entity_resolution_batches VALUES(?,?,?,?,?,?)',vals)
+                    for table,key_fields in (
+                        ('entity_resolution_entities',('batch_id','entity_id')),
+                        ('entity_resolution_mentions',('batch_id','extraction_id','mention_path'))):
+                        for row in d[table]:
+                            vals=tuple(row.values())
+                            where=' AND '.join(f'{field}=?' for field in key_fields)
+                            existing=out.execute(f'SELECT * FROM {table} WHERE {where}',
+                                                 tuple(row[field] for field in key_fields)).fetchone()
+                            if existing and tuple(existing) != vals:
+                                raise ValueError(f'Conflicting immutable {table} row')
+                            if not existing:
+                                marks=','.join('?' for _ in vals)
+                                out.execute(f'INSERT INTO {table} VALUES({marks})',vals)
                 if out.execute('PRAGMA foreign_key_check').fetchall():
                     raise ValueError('Reconciled database fails foreign_key_check')
         except BaseException:

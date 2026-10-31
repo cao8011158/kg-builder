@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Manual cross-paper entity resolution review v0.1",
+  "type": "object",
+  "required": ["schema_version", "batch_id", "reviewer", "reviewed_at", "source_db_sha256", "entities", "mentions"],
+  "properties": {
+    "schema_version": {"const": "research-kg-entity-resolution/0.1"},
+    "batch_id": {"$ref": "#/$defs/text"}, "reviewer": {"$ref": "#/$defs/text"},
+    "reviewed_at": {"$ref": "#/$defs/text"},
+    "source_db_sha256": {"$ref": "#/$defs/hash"},
+    "notes": {"type": "string"},
+    "entities": {"type": "array", "items": {"type": "object", "required": ["entity_id", "kind", "name", "scope", "scope_version_id", "aliases", "identity_definition", "support"], "properties": {
+      "entity_id": {"$ref": "#/$defs/text"}, "kind": {"$ref": "#/$defs/kind"},
+      "name": {"$ref": "#/$defs/text"}, "scope": {"enum": ["named_concept", "paper_version_local"]},
+      "scope_version_id": {"type": ["string", "null"]},
+      "aliases": {"type": "array", "items": {"$ref": "#/$defs/text"}, "uniqueItems": true},
+      "identity_definition": {"$ref": "#/$defs/text"},
+      "artifact_kind": {"enum": ["MODEL", "AGENT_SYSTEM", "TOOL", "SKILL", "SKILL_LIBRARY", "CONTEXT_PLAYBOOK", "PROMPT", "CODE_IMPLEMENTATION", "DATASET"]},
+      "support": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["extraction_id", "source_payload_sha256"], "properties": {
+        "extraction_id": {"$ref": "#/$defs/text"},
+        "source_payload_sha256": {"$ref": "#/$defs/hash"},
+        "evidence_ref": {"$ref": "#/$defs/text"},
+        "evidence_locator_path": {"$ref": "#/$defs/locator_path"}},
+        "anyOf": [{"required": ["evidence_ref"]}, {"required": ["evidence_locator_path"]}]}}
+    }}},
+    "mentions": {"type": "array", "items": {"type": "object", "required": ["extraction_id", "kind", "mention_path", "source_payload_sha256", "surface_name", "source_key", "decision", "entity_id", "rationale", "evidence_refs", "evidence_locator_paths"], "properties": {
+      "extraction_id": {"$ref": "#/$defs/text"}, "kind": {"$ref": "#/$defs/kind"},
+      "mention_path": {"type": "string", "pattern": "^/(methods|research_problems|artifacts)/(0|[1-9][0-9]*)$"},
+      "source_payload_sha256": {"$ref": "#/$defs/hash"},
+      "surface_name": {"$ref": "#/$defs/text"}, "source_key": {"type": ["string", "null"]},
+      "decision": {"enum": ["resolved", "pending"]},
+      "entity_id": {"type": ["string", "null"]},
+      "rationale": {"$ref": "#/$defs/text"},
+      "evidence_refs": {"type": "array", "items": {"$ref": "#/$defs/text"}, "uniqueItems": true},
+      "evidence_locator_paths": {"type": "array", "items": {"$ref": "#/$defs/locator_path"}, "uniqueItems": true}
+    }}}
+  },
+  "$defs": {
+    "text": {"type": "string", "pattern": "\\S"},
+    "hash": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+    "kind": {"enum": ["Method", "ResearchProblem", "Artifact"]},
+    "locator_path": {"type": "string", "pattern": "^/evidence_locators/(0|[1-9][0-9]*)$"}
+  }
+}

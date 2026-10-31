@@ -71,6 +71,29 @@ def connect(path):
       topics_json TEXT NOT NULL, reason TEXT NOT NULL, payload_json TEXT NOT NULL,
       reviewed_at TEXT NOT NULL, PRIMARY KEY(review_id,paper_id)
     );
+    CREATE TABLE IF NOT EXISTS entity_resolution_batches (
+      batch_id TEXT PRIMARY KEY, schema_version TEXT NOT NULL,
+      reviewer TEXT NOT NULL, reviewed_at TEXT NOT NULL,
+      manifest_sha256 TEXT NOT NULL, payload_json TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS entity_resolution_entities (
+      batch_id TEXT NOT NULL REFERENCES entity_resolution_batches(batch_id),
+      entity_id TEXT NOT NULL, kind TEXT NOT NULL,
+      scope TEXT NOT NULL CHECK(scope IN ('named_concept','paper_version_local')),
+      scope_version_id TEXT REFERENCES paper_versions(version_id),
+      payload_json TEXT NOT NULL, PRIMARY KEY(batch_id,entity_id)
+    );
+    CREATE TABLE IF NOT EXISTS entity_resolution_mentions (
+      batch_id TEXT NOT NULL REFERENCES entity_resolution_batches(batch_id),
+      extraction_id TEXT NOT NULL REFERENCES extraction_records(extraction_id),
+      kind TEXT NOT NULL, mention_path TEXT NOT NULL,
+      source_payload_sha256 TEXT NOT NULL,
+      decision TEXT NOT NULL CHECK(decision IN ('resolved','pending')),
+      entity_id TEXT, payload_json TEXT NOT NULL,
+      PRIMARY KEY(batch_id,extraction_id,mention_path),
+      FOREIGN KEY(batch_id,entity_id) REFERENCES entity_resolution_entities(batch_id,entity_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_resolution_mentions_entity ON entity_resolution_mentions(batch_id,entity_id);
     ''')
     con.commit()
     return con
