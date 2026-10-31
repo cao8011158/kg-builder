@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Unversioned legacy research extraction",
+  "type": "object",
+  "required": ["paper_id", "version_id", "summary", "methods", "research_problems", "findings", "evidence_locators"],
+  "properties": {
+    "paper_id": {"$ref": "#/$defs/text"}, "version_id": {"$ref": "#/$defs/text"},
+    "summary": {"type": "string"}, "extractor_type": {"$ref": "#/$defs/text"},
+    "extractor_version": {"$ref": "#/$defs/text"}, "source_scope": {"$ref": "#/$defs/text"},
+    "status": {"$ref": "#/$defs/text"},
+    "methods": {"type": "array", "items": {"type": "object", "required": ["name"], "properties": {"name": {"$ref": "#/$defs/text"}}}},
+    "research_problems": {"type": "array", "items": {"type": "object", "required": ["name"], "properties": {"name": {"$ref": "#/$defs/text"}}}},
+    "findings": {"type": "array"}, "evaluations": {"type": "array"},
+    "evidence_locators": {"type": "array", "items": {"type": "object", "required": ["source_url", "section"], "properties": {"source_url": {"$ref": "#/$defs/text"}, "section": {"$ref": "#/$defs/text"}}}}
+  },
+  "$defs": {"text": {"type": "string", "minLength": 1}}
+}

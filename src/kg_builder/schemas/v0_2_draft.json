@@ -1,0 +1,570 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Research extraction v0.2 draft pilot",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "paper_id",
+    "version_id",
+    "summary",
+    "paper_version",
+    "research_problems",
+    "methods",
+    "contributions",
+    "artifacts",
+    "benchmarks",
+    "metrics",
+    "evaluations",
+    "findings",
+    "evidence_locators",
+    "relations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "research-kg-extraction/0.2-draft-pilot"
+    },
+    "paper_id": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "version_id": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "extractor_type": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "extractor_version": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "source_scope": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "status": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "topic_tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "\\S"
+      },
+      "uniqueItems": true
+    },
+    "limitations": {
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "paper_reference": {
+      "type": "object",
+      "properties": {
+        "arxiv_id": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "title": {
+          "type": "string",
+          "pattern": "\\S"
+        }
+      }
+    },
+    "paper_version": {
+      "type": "object",
+      "required": [
+        "version_label",
+        "source_url",
+        "retrieved_html_sha256"
+      ],
+      "properties": {
+        "version_label": {
+          "type": "string",
+          "pattern": "^v[1-9][0-9]*$"
+        },
+        "source_url": {
+          "type": "string",
+          "pattern": "^https?://\\S+$"
+        },
+        "retrieved_html_sha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "version_selection": {
+          "type": "string"
+        },
+        "publication_date_verification": {
+          "type": "string"
+        }
+      }
+    },
+    "research_problems": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "key",
+          "evidence_refs",
+          "name",
+          "identity_scope"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "\\S"
+            },
+            "uniqueItems": true
+          },
+          "name": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "identity_scope": {
+            "type": "string",
+            "pattern": "\\S"
+          }
+        }
+      }
+    },
+    "methods": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "key",
+          "evidence_refs",
+          "name",
+          "description",
+          "role"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "\\S"
+            },
+            "uniqueItems": true
+          },
+          "name": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "description": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "role": {
+            "type": "string",
+            "pattern": "\\S"
+          }
+        }
+      }
+    },
+    "contributions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "key",
+          "evidence_refs",
+          "identity_scope",
+          "description",
+          "claim_status"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "\\S"
+            },
+            "uniqueItems": true
+          },
+          "identity_scope": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "description": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "claim_status": {
+            "type": "string",
+            "pattern": "\\S"
+          }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "key",
+          "evidence_refs",
+          "name",
+          "artifact_kind",
+          "name_origin",
+          "identity_scope"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "\\S"
+            },
+            "uniqueItems": true
+          },
+          "name": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "artifact_kind": {
+            "enum": [
+              "MODEL",
+              "AGENT_SYSTEM",
+              "TOOL",
+              "SKILL",
+              "SKILL_LIBRARY",
+              "CONTEXT_PLAYBOOK",
+              "PROMPT",
+              "CODE_IMPLEMENTATION",
+              "DATASET"
+            ]
+          },
+          "name_origin": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "identity_scope": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "artifact_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "benchmarks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "key",
+          "evidence_refs",
+          "name",
+          "protocol"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "\\S"
+            },
+            "uniqueItems": true
+          },
+          "name": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "protocol": {
+            "type": "string",
+            "pattern": "\\S"
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "key",
+          "evidence_refs",
+          "name",
+          "definition",
+          "unit",
+          "higher_is_better"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "\\S"
+            },
+            "uniqueItems": true
+          },
+          "name": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "definition": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "unit": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "higher_is_better": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "evaluations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "key",
+          "evidence_refs",
+          "identity_scope",
+          "target_artifact",
+          "benchmark",
+          "metric",
+          "value",
+          "unit",
+          "setup",
+          "result_status"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "\\S"
+            },
+            "uniqueItems": true
+          },
+          "identity_scope": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "target_artifact": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "benchmark": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "metric": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "value": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "unit": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "setup": {
+            "type": "object"
+          },
+          "result_status": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "value_source_literal": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "uncertainty": {
+            "type": "object",
+            "properties": {
+              "confidence_interval": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "standard_deviation": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "key",
+          "evidence_refs",
+          "description",
+          "claim_status"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "\\S"
+            },
+            "uniqueItems": true
+          },
+          "description": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "claim_status": {
+            "type": "string",
+            "pattern": "\\S"
+          }
+        }
+      }
+    },
+    "evidence_locators": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "evidence_id",
+          "source_url",
+          "section",
+          "html_sha256",
+          "scope"
+        ],
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "source_url": {
+            "type": "string",
+            "pattern": "^https?://\\S+$"
+          },
+          "section": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "html_anchor": {
+            "type": "string"
+          },
+          "html_sha256": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{64}$"
+          },
+          "scope": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "checked_by": {
+            "type": "string",
+            "pattern": "\\S"
+          }
+        }
+      }
+    },
+    "relations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "source",
+          "predicate",
+          "target",
+          "evidence_refs",
+          "assertion_status"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "predicate": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "target": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "\\S"
+            },
+            "uniqueItems": true
+          },
+          "assertion_status": {
+            "type": "string",
+            "pattern": "\\S"
+          }
+        }
+      }
+    }
+  }
+}

@@ -7,7 +7,10 @@ name = "research-kg-builder"
 version = "0.1.0"
 description = "Scientific literature metadata ingestion and versioned extraction store"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["jsonschema>=4.23,<5"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"kg_builder.schemas" = ["*.json"]

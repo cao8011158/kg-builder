@@ -73,7 +73,7 @@ There is no unconditional global `OUTPERFORMS` assertion. Comparisons are obtain
 ## Remaining work before freezing or graph materialization
 
 1. Review cross-paper Method/Problem/Artifact aliases and candidate identities; preserve paper-local descriptive labels.
-2. Agree on a machine-readable extraction schema and versioned migration strategy. The current importer validates the existing minimum contract and stores extra candidate fields as JSON; it is not a complete v0.2 schema validator.
+2. Review and approve the packaged [candidate JSON Schema 2020-12 profile](../../src/kg_builder/schemas/v0_2_draft.json) and [explicit unversioned legacy profile](../../src/kg_builder/schemas/legacy.json), then define migrations before freezing. The offline importer validates the whole batch and local evidence/relation semantics before atomic storage; declared unknown versions are rejected. These profiles cover the six-pilot shape and existing legacy records, but do not settle future ontology or cross-paper identity rules.
 3. Review additional examples including negative results, multi-metric configurations, revision changes and unresolved identity cases.
 4. Implement graph writer constraints and positive/negative query checks only after schema approval. Do not report these as implemented by this pilot.
-5. Preserve the additional `relevance_reviews` annotations when performing future database migrations. The offline reconciliation tool still supports its documented ingestion tables rather than arbitrary annotation tables.
+5. Keep `relevance_reviews` and its original audit rows during reconciliation. The offline tool now maps review paper IDs, retains original extraction payload bytes when identities are unchanged, and rejects unfamiliar tables or columns before output creation. Future annotation tables and schema changes still require explicit migrations.

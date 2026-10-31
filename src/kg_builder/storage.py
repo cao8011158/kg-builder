@@ -6,6 +6,7 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from .extraction_validation import validate_extraction_batch
 
 NOW = lambda: datetime.now(timezone.utc).isoformat(timespec='seconds')
 
@@ -62,6 +63,13 @@ def connect(path):
       run_id TEXT PRIMARY KEY, mode TEXT NOT NULL, started_at TEXT NOT NULL,
       completed_at TEXT, records_seen INTEGER DEFAULT 0, records_upserted INTEGER DEFAULT 0,
       status TEXT NOT NULL, error TEXT
+    );
+    CREATE TABLE IF NOT EXISTS relevance_reviews (
+      review_id TEXT NOT NULL, paper_id TEXT NOT NULL REFERENCES papers(paper_id),
+      decision TEXT NOT NULL CHECK(decision IN ('include','exclude','pending')),
+      review_status TEXT NOT NULL, source_scope TEXT NOT NULL,
+      topics_json TEXT NOT NULL, reason TEXT NOT NULL, payload_json TEXT NOT NULL,
+      reviewed_at TEXT NOT NULL, PRIMARY KEY(review_id,paper_id)
     );
     ''')
     con.commit()
@@ -199,23 +207,54 @@ def upsert_paper(con, record, source, source_id, query, retrieved_at=None):
     return paper_id, version_id
 
 def ingest_extraction(con, payload):
-    """Store independently reviewed/assistant-curated structured content; never call an LLM."""
-    required = {'paper_id','version_id','summary','methods','research_problems','findings','evidence_locators'}
-    missing = required - payload.keys()
-    if missing: raise ValueError('Missing extraction fields: '+', '.join(sorted(missing)))
-    p = con.execute('SELECT paper_id FROM paper_versions WHERE version_id=?',(payload['version_id'],)).fetchone()
-    if not p or p[0] != payload['paper_id']: raise ValueError('Unknown or mismatched paper/version')
-    for loc in payload['evidence_locators']:
-        if not loc.get('source_url') or not loc.get('section'):
-            raise ValueError('Evidence locator must contain source_url and section')
-    key = '|'.join([payload['paper_id'], payload['version_id'], payload.get('extractor_type','assistant_manual'), payload.get('extractor_version','2026-10-31-v1')])
-    extraction_id = 'extr:' + hashlib.sha256(key.encode('utf-8')).hexdigest()[:24]
-    with con:
-        con.execute('''INSERT INTO extraction_records VALUES(?,?,?,?,?,?,?,?,?)
-          ON CONFLICT(paper_id,version_id,extractor_type,extractor_version) DO UPDATE SET
-          payload_json=excluded.payload_json,status=excluded.status,extracted_at=excluded.extracted_at''',
-          (extraction_id,payload['paper_id'],payload['version_id'],
-           payload.get('extractor_type','assistant_manual'), payload.get('extractor_version','2026-10-31-v1'),
-           payload.get('source_scope','abstract_only'),payload.get('status','draft_requires_review'),
-           json.dumps(payload,ensure_ascii=False),NOW()))
-    return extraction_id
+    """Compatibility wrapper for one reviewed/draft record."""
+    return ingest_extractions(con,[payload])[0]
+
+
+def ingest_extractions(con, records):
+    """Validate first, then atomically store the whole batch; never call an LLM.
+
+    A SAVEPOINT keeps an existing caller transaction open on both success and failure.
+    An unchanged natural key and payload is a no-op, retaining ID and extracted_at.
+    """
+    validate_extraction_batch(records)
+    con.execute('SAVEPOINT extraction_batch')
+    ids=[]
+    try:
+        for payload in records:
+            row=con.execute('''SELECT paper_id,version_label,source_url FROM paper_versions
+                WHERE version_id=?''',(payload['version_id'],)).fetchone()
+            if not row or row[0] != payload['paper_id']:
+                raise ValueError('Unknown or mismatched paper/version')
+            if 'schema_version' in payload:
+                pinned=payload['paper_version']
+                if pinned['version_label'] != row[1] or pinned['source_url'] != row[2]:
+                    raise ValueError('Pinned version label/URL differs from owning PaperVersion')
+            extractor_type=payload.get('extractor_type','assistant_manual')
+            extractor_version=payload.get('extractor_version','2026-10-31-v1')
+            key='|'.join((payload['paper_id'],payload['version_id'],extractor_type,extractor_version))
+            proposed_id='extr:'+hashlib.sha256(key.encode('utf-8')).hexdigest()[:24]
+            existing=con.execute('''SELECT extraction_id,payload_json,source_scope,status
+                FROM extraction_records WHERE paper_id=? AND version_id=? AND
+                extractor_type=? AND extractor_version=?''',
+                (payload['paper_id'],payload['version_id'],extractor_type,extractor_version)).fetchone()
+            encoded=json.dumps(payload,ensure_ascii=False,allow_nan=False)
+            scope=payload.get('source_scope','abstract_only')
+            status=payload.get('status','draft_requires_review')
+            if existing:
+                extraction_id=existing[0]
+                if (json.loads(existing[1]) != payload or existing[2] != scope or existing[3] != status):
+                    con.execute('''UPDATE extraction_records SET payload_json=?,source_scope=?,status=?,extracted_at=?
+                        WHERE extraction_id=?''',(encoded,scope,status,NOW(),extraction_id))
+            else:
+                extraction_id=proposed_id
+                con.execute('''INSERT INTO extraction_records VALUES(?,?,?,?,?,?,?,?,?)''',
+                    (extraction_id,payload['paper_id'],payload['version_id'],extractor_type,
+                     extractor_version,scope,status,encoded,NOW()))
+            ids.append(extraction_id)
+        con.execute('RELEASE SAVEPOINT extraction_batch')
+    except BaseException:
+        con.execute('ROLLBACK TO SAVEPOINT extraction_batch')
+        con.execute('RELEASE SAVEPOINT extraction_batch')
+        raise
+    return ids

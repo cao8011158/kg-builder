@@ -9,13 +9,39 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from kg_builder.storage import connect, normalise_doi, arxiv_norm, identities
+from kg_builder.extraction_validation import validate_extraction
 
 TABLES = ('papers', 'paper_versions', 'source_records', 'paper_topics',
-          'discovery_hits', 'extraction_records', 'pipeline_runs')
+          'discovery_hits', 'extraction_records', 'pipeline_runs',
+          'paper_doi_aliases', 'relevance_reviews')
+OPTIONAL_TABLES = {'paper_doi_aliases','relevance_reviews','reconciliation_audit','paper_redirects'}
 
 
 def rows(db, table):
     return [dict(r) for r in db.execute(f'SELECT * FROM {table}')]
+
+
+def remap_payload(raw, old_paper, paper, old_version, version):
+    """Rewrite only structured identifier values; retain exact JSON bytes if unchanged."""
+    if old_paper == paper and old_version == version:
+        candidate=json.loads(raw)
+        if isinstance(candidate,dict) and 'schema_version' in candidate:
+            validate_extraction(candidate)
+        return raw
+    def remap(value):
+        if isinstance(value,str):
+            if old_version and value == old_version: return version
+            if old_version and value.startswith(old_version+'#'):
+                return version+value[len(old_version):]
+            if value == old_paper: return paper
+            return value
+        if isinstance(value,list): return [remap(v) for v in value]
+        if isinstance(value,dict): return {k:remap(v) for k,v in value.items()}
+        return value
+    payload=remap(json.loads(raw))
+    if isinstance(payload,dict) and 'schema_version' in payload:
+        validate_extraction(payload)
+    return json.dumps(payload,ensure_ascii=False)
 
 
 def reconcile(inputs, output, report):
@@ -25,7 +51,15 @@ def reconcile(inputs, output, report):
             or output == report or output.exists() or report.exists()):
         raise ValueError('Inputs must be distinct; output and report must be new paths')
     dbs = []
+    input_tables=[]
     try:
+        schema_db=connect(':memory:')
+        expected_columns={t:{row[1] for row in schema_db.execute(f'PRAGMA table_info({t})')}
+                          for t in TABLES}
+        schema_db.close()
+        expected_columns['reconciliation_audit']={
+            'input_sha256','table_name','ordinal','original_json','mapped_paper_id','mapped_version_id'}
+        expected_columns['paper_redirects']={'input_sha256','original_paper_id','paper_id'}
         for path in inputs:
             db = sqlite3.connect(f'file:{path}?mode=ro', uri=True)
             db.row_factory = sqlite3.Row
@@ -33,8 +67,19 @@ def reconcile(inputs, output, report):
                 raise ValueError(f'Input failed integrity_check: {path}')
             if db.execute('PRAGMA foreign_key_check').fetchall():
                 raise ValueError(f'Input failed foreign_key_check: {path}')
+            present={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
+            unknown=present-set(TABLES)-OPTIONAL_TABLES
+            if unknown:
+                raise ValueError(f'Unsupported input tables requiring explicit migration: {sorted(unknown)}')
+            for table in present:
+                columns={row[1] for row in db.execute(f'PRAGMA table_info({table})')}
+                extras=columns-expected_columns[table]
+                if extras:
+                    raise ValueError(f'Unsupported input columns in {table}: {sorted(extras)}')
             dbs.append(db)
-        datasets = [{t: rows(db,t) for t in TABLES} for db in dbs]
+            input_tables.append(present)
+        datasets = [{t: rows(db,t) if t in input_tables[i] else [] for t in TABLES}
+                    for i,db in enumerate(dbs)]
         papers = {(i,p['paper_id']):p for i,d in enumerate(datasets) for p in d['papers']}
         nodes = list(papers)
         parent = {n:n for n in nodes}
@@ -63,11 +108,8 @@ def reconcile(inputs, output, report):
                         arxiv[n] = found_arxiv
                 except (ValueError, TypeError, AttributeError) as exc:
                     raise ValueError(f'Invalid or contradictory source identity for {n}') from exc
-            try:
-                for a in rows(dbs[i], 'paper_doi_aliases'):
-                    dois[(i,a['paper_id'])].add(a['doi'])
-            except sqlite3.OperationalError:
-                pass
+            for a in d['paper_doi_aliases']:
+                dois[(i,a['paper_id'])].add(a['doi'])
         keys = defaultdict(list)
         for n in nodes:
             if arxiv[n]: group_arxiv[n].add(arxiv[n])
@@ -211,11 +253,9 @@ def reconcile(inputs, output, report):
                         eid = e['extraction_id']
                         if out.execute('SELECT 1 FROM extraction_records WHERE extraction_id=?',(eid,)).fetchone():
                             eid += ':'+hashes[i][:12]
-                        payload = json.loads(e['payload_json'])
-                        if isinstance(payload,dict):
-                            payload['paper_id'],payload['version_id'] = target,vid
+                        payload = remap_payload(e['payload_json'],e['paper_id'],target,e['version_id'],vid)
                         vals=(eid,target,vid,e['extractor_type'],e['extractor_version'],e['source_scope'],
-                              e['status'],json.dumps(payload,ensure_ascii=False),e['extracted_at'])
+                              e['status'],payload,e['extracted_at'])
                         try: out.execute('INSERT INTO extraction_records VALUES(?,?,?,?,?,?,?,?,?)',vals)
                         except sqlite3.IntegrityError:
                             # Same logical extraction key: full original remains in reconciliation_audit.
@@ -223,6 +263,13 @@ def reconcile(inputs, output, report):
                     for run in d['pipeline_runs']:
                         vals = list(run.values())
                         out.execute('INSERT OR IGNORE INTO pipeline_runs VALUES(?,?,?,?,?,?,?,?)',vals)
+                    for review in d['relevance_reviews']:
+                        target=mapping[(i,review['paper_id'])]
+                        payload=remap_payload(review['payload_json'],review['paper_id'],target,None,None)
+                        out.execute('''INSERT OR IGNORE INTO relevance_reviews VALUES(?,?,?,?,?,?,?,?,?)''',
+                            (review['review_id'],target,review['decision'],review['review_status'],
+                             review['source_scope'],review['topics_json'],review['reason'],payload,
+                             review['reviewed_at']))
                     for table in TABLES:
                         for index,row in enumerate(d[table]):
                             original_pid = row.get('paper_id')

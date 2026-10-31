@@ -99,7 +99,7 @@ class IngestionTests(unittest.TestCase):
         same=reconcile([a,duplicate],self.dir/'same_bytes.db',self.dir/'same_bytes.json')
         self.assertEqual(same['counts']['papers'],1)
         self.assertEqual(same['counts']['source_records'],1)
-        self.assertEqual(same['counts']['reconciliation_audit'],5)
+        self.assertEqual(same['counts']['reconciliation_audit'],6)
         self.assertEqual(a.read_bytes(),duplicate.read_bytes())
         corrupted=self.dir/'altered_audit.db'
         shutil.copyfile(self.dir/'out.db',corrupted)
