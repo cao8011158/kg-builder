@@ -39,6 +39,9 @@ class RetrievalPreprocessTests(unittest.TestCase):
         self.db.execute("INSERT INTO source_records VALUES(?,?,?,?,?,?,?)",("arxiv","2501.00001",self.pid,
             "https://arxiv.org/abs/2501.00001","2026-10-31","hash",
             json.dumps({"normalized":{"authors":["Ada"]},"raw":{"categories":["cs.AI"],"primary_category":"cs.AI"}})))
+        self.db.execute("INSERT INTO source_records VALUES(?,?,?,?,?,?,?)",("semantic_scholar","S1",self.pid,
+            None,"2026-10-31","hash2",json.dumps({"normalized":{},
+                "raw":{"s2FieldsOfStudy":[{"category":"Computer Science","source":"s2-fos-model"}]}})))
         self.db.execute("INSERT INTO extraction_records VALUES(?,?,?,?,?,?,?,?,?)",
             ("e1",self.pid,self.vid,"manual","1","selected_sections","draft_requires_review",
              json.dumps({"contributions":[{"description":"A contribution", "key":"c1"}]}),"2026-01-01"))
@@ -70,7 +73,7 @@ class RetrievalPreprocessTests(unittest.TestCase):
         self.assertEqual(detail["contributions"][0]["version_id"],self.vid)
         self.assertEqual({e["relation"] for e in detail["edges"]},{"references","related_work"})
         self.assertEqual({l["origin"] for l in detail["labels"] if l["kind"]=="original_class"},
-                         {"arxiv","arxiv_enrichment"})
+                         {"arxiv","arxiv_enrichment","semantic_scholar"})
         self.assertEqual(next(l["parent"]["subfield"]["id"] for l in detail["labels"] if l["kind"]=="openalex_topic"),"S1")
         self.assertEqual(detail["tasks"],[])
         con=sqlite3.connect(self.index)

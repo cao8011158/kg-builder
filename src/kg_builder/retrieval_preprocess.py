@@ -106,11 +106,11 @@ def _labels(out, pid, kind, items, origin, source_id=""):
     for item in items or []:
         if isinstance(item, str):
             item = {"name": item}
-        if not isinstance(item, dict) or not (item.get("name") or item.get("display_name")):
+        if not isinstance(item, dict) or not (item.get("name") or item.get("display_name") or item.get("category")):
             continue
         parent = {k: item[k] for k in ("subfield", "field", "domain") if k in item}
         out.execute("INSERT OR IGNORE INTO labels VALUES(?,?,?,?,?,?,?,?)",
-                    (pid, kind, item.get("id") or "", item.get("name") or item["display_name"], item.get("score"),
+                    (pid, kind, item.get("id") or "", item.get("name") or item.get("display_name") or item["category"], item.get("score"),
                      item.get("origin") or origin, _json(parent) if parent else None, source_id))
 
 
@@ -146,6 +146,7 @@ def _insert_paper(out, p, versions, source_rows, aliases, enrichment):
             _labels(out,pid,"original_primary_class",[raw["primary_category"]] if raw.get("primary_category") else [],"arxiv",s["source_id"])
         if s["source_name"] == "semantic_scholar":
             _labels(out,pid,"original_class",raw.get("fieldsOfStudy"),"semantic_scholar",s["source_id"])
+            _labels(out,pid,"original_class",raw.get("s2FieldsOfStudy"),"semantic_scholar",s["source_id"])
         # The stored candidate heuristics are useful retrieval labels, not authoritative ontology classes.
         _labels(out,pid,"candidate_topic",norm.get("topics"),s["source_name"],s["source_id"])
         out.execute("INSERT INTO sources VALUES(?,?,?,?,?,?)",(s["source_name"],s["source_id"],pid,
