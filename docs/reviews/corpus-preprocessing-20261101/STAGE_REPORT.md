@@ -1,6 +1,6 @@
 # 全候选池预处理：三个 batch
 
-状态：Batch 1 已通过第 2 轮、Batch 2 已通过第 1 轮正式审阅；即将进入 Batch 3，本 step 尚未完成。
+状态：三个 batch 均已通过正式独立审阅；全池筛选、提取、增量消歧／索引、保存与下载恢复完成。2 篇因证据不足保留 pending。
 
 ## 固定范围与权限
 
@@ -124,3 +124,28 @@ Research Square compaction-pay 仍只有标题且来源不可访问，保留 pen
 corpus_resolution 完成 7 个候选包、126 条判断：28 条匹配，98 个新实体，0 pending。当前完整语义库 171 个来源、538 个源描述关联、393 个实体（132 ResearchProblem、157 Method、104 Benchmark）、171 条论文内贡献。Kairos 的方法节点保留实际来源说明，没有推断论文版本或发布日期。Terminal-Bench 等明确编号发布版保持区分。
 
 主 Agent 已读取全部本批目标归属及定义，当前未确认误合并；完整预审检查覆盖 365 个不重叠候选、165 新提取与 6 复用、全部旧主库行保留、所有 mention 原始 item／hash／source fingerprint 和实体类型、真实混合查询及明细索引，均通过。已导出 365 条有效筛选、171 份精简提取和共享实体 JSON。当前有效总计 171 include／192 exclude／2 pending；尚需固定远端新 head 后正式复跑、完整规模／恢复及持久化验收。
+
+## Batch 3 — 第 1/3 轮正式独立审阅与完整功能验收：通过
+
+固定远端提交 `9b7905462f3afb28f26fc9ccd9ab9d2d310059c7`，取回并核对内容一致。开发者和主 Agent 分别在此 head 复跑 62 项全仓测试，另 6 项定向通过。独立复核覆盖 121 条 scope、42 份精简字段及 126/126 语义判断，未确认误合并或明显漏合并；3 条范围修正已在正式冻结前完成，没有重置轮次。
+
+全池独立检查通过：365 条不重复清单与有效筛选；171 纳入／192 排除／2 待定；165 新提取及 6 复用。原始主库所有历史行保留，旧 46 个 extraction payload 不变；当前 master 365 篇／403 版本／211 条提取（含 40 条原有历史格式及 171 份当前精简结果）。171 个语义来源、538 条描述、393 节点及 171 条论文内贡献均逐项对照来源 hash 和原始 item；0 未处理语义描述。重复本批 master_new=0、sidecar_imported=0。
+
+在真实全库副本上，LoCoMo 明细冷／热均读取 5 行、1314 字节、113 个 SQLite VM 操作；加入 500 个无关实体和约 10MB 文本后不变，实际计划没有全表 SCAN。贡献混合检索重复结果一致，无新增向量计算和索引构建。正式工作 sidecar 也实际准备四类检索向量（问题、方法、benchmark、论文贡献），本地 CPU 模型，无付费 API；热调用不重算。
+
+既有主库与 semantic 文件更新前 metadata 与基线一致，先生成一致 SQLite backup 后按原文件 ID 保存，未改变分享权限。重新下载后的 SHA-256 与本地发布副本一致，外键和 integrity_check 通过；恢复后 365 篇、211 条提取、171 来源／538 描述／393 节点均正确，SAGE／LoCoMo 查询、四类混合检索和分页通过，恢复查询实际新增 embedding 计算为 0。发布主库 SHA-256 `1b8671a71cb8ff7bb4677e9bce27b6ca54b1e9f3b5946404a0ea8fe226b01757`；semantic SHA-256 `db1b994f1efc89785ca5557a800e2293f4d091e0dc1a161c823febeb6397d0c5`。
+
+## 最终结果与使用边界
+
+| Batch | 检查 | 纳入 | 排除 | 待定 | 新提取 | 正式审阅 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 1 | 122 | 58 | 64 | 0 | 52，另复用 6 | 第 2 轮通过，保留第 1 轮和后续来源裁决 |
+| 2 | 122 | 71 | 50 | 1 | 71 | 第 1 轮通过 |
+| 3 | 121 | 42 | 78 | 1 | 42 | 第 1 轮通过 |
+| 合计 | 365 | 171 | 192 | 2 | 165，另复用 6 | 三批均通过 |
+
+节点：132 个 ResearchProblem、157 个 Method、104 个 Benchmark。此次结果是可检索的语义整理，不是人为标注检索质量基准或论文结论复现。171 份精简结果中，154 份依据已存摘要，8 份依据补查主来源摘要，9 份依据正文选定章节；各自 source_scope 保留。Kairos 仅存量年份 2025 和相关发表版 2026 可见，最早公开具体日及版本对应仍未证实，已在 review 标记，未补造日期。2 个 pending：泛化 skill 概述缺少 LLM agent 范围证据且主文不可得；Research Square compaction-pay 缺少可核实正文。两条均无提取／语义节点。
+
+当前数据与所有检查点：[任务数据目录](https://drive.google.com/drive/folders/1-_8xROA-gN35SYtX_DQHeHJZp9YtypcH)。可直接读 [365 篇处理结果](https://drive.google.com/file/d/1KJlGEjmMYOWz3Y7msxfZxBb38Vd7sK2-/view)、[171 份精简提取](https://drive.google.com/file/d/10EHz_Vk46udszVnWN5nILCGxQt9nKoBM/view)、[393 个共享节点与源关联](https://drive.google.com/file/d/19_o2mBi6PKlap3e6Nm_JzLL0XVxeezwa/view)。代码保留默认关闭的 API adapter，当前无付费 LLM 调用；后续处理由代码执行约束、入库和检索，语义判断以显式审阅 JSON 为依据。没有启用调度器或 Neo4j，也没有合并 main。
+
+合并 gate 实际结果唯一 BLOCKED 项为未授权 main 合并；测试、审阅、日志及规模证据无缺项。本任务的数据处理和保存已完成。完整代码及证据在既有 [PR #1](https://github.com/cao8011158/kg-builder/pull/1)，保留 draft。

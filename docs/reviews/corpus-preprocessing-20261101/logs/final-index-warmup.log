@@ -1,0 +1,29 @@
+{
+  "index_kinds": [
+    "ResearchProblem",
+    "Method",
+    "Benchmark",
+    "Contribution"
+  ],
+  "counts": {
+    "sources": 171,
+    "entities": 393,
+    "contributions": 171,
+    "mentions": 538,
+    "embedding_cache": 1064
+  },
+  "cold": {
+    "embedding_cache_hits": 400,
+    "embeddings_computed": 168,
+    "dense_index_builds": 4,
+    "detail_rows": 0
+  },
+  "warm": {
+    "embedding_cache_hits": 404,
+    "embeddings_computed": 168,
+    "dense_index_builds": 4,
+    "detail_rows": 0
+  },
+  "same_results": true,
+  "paid_api_calls": 0
+}

@@ -1,0 +1,110 @@
+{
+  "actual_counts": {
+    "sources": 171,
+    "mentions": 538,
+    "entities": 393,
+    "contributions": 171
+  },
+  "warm_reuse": {
+    "same_results": true,
+    "new_index_builds": 0,
+    "new_embeddings": 0
+  },
+  "pagination": {
+    "first_page": 1,
+    "second_page": 1,
+    "next_offset": 1
+  },
+  "locality": {
+    "measurements": [
+      {
+        "label": "actual_corpus_cold_detail",
+        "fetched_rows": 5,
+        "fetched_bytes": 1314,
+        "sqlite_vm_opcodes": 113,
+        "reply_bytes": 1662,
+        "seconds": 0.00020740599575219676,
+        "plans": [
+          [
+            3,
+            0,
+            39,
+            "SEARCH entities USING INDEX sqlite_autoindex_entities_1 (entity_id=?)"
+          ],
+          [
+            10,
+            0,
+            62,
+            "SEARCH m USING INDEX mentions_entity (entity_id=?)"
+          ],
+          [
+            17,
+            0,
+            46,
+            "SEARCH s USING INDEX sqlite_autoindex_sources_1 (extraction_id=?)"
+          ]
+        ]
+      },
+      {
+        "label": "actual_corpus_warm_detail",
+        "fetched_rows": 5,
+        "fetched_bytes": 1314,
+        "sqlite_vm_opcodes": 113,
+        "reply_bytes": 1662,
+        "seconds": 0.00010506500257179141,
+        "plans": [
+          [
+            3,
+            0,
+            39,
+            "SEARCH entities USING INDEX sqlite_autoindex_entities_1 (entity_id=?)"
+          ],
+          [
+            10,
+            0,
+            62,
+            "SEARCH m USING INDEX mentions_entity (entity_id=?)"
+          ],
+          [
+            17,
+            0,
+            46,
+            "SEARCH s USING INDEX sqlite_autoindex_sources_1 (extraction_id=?)"
+          ]
+        ]
+      },
+      {
+        "label": "actual_corpus_plus_500_unrelated_entities_10MB",
+        "fetched_rows": 5,
+        "fetched_bytes": 1314,
+        "sqlite_vm_opcodes": 113,
+        "reply_bytes": 1662,
+        "seconds": 0.00043056499998783693,
+        "plans": [
+          [
+            3,
+            0,
+            39,
+            "SEARCH entities USING INDEX sqlite_autoindex_entities_1 (entity_id=?)"
+          ],
+          [
+            10,
+            0,
+            62,
+            "SEARCH m USING INDEX mentions_entity (entity_id=?)"
+          ],
+          [
+            17,
+            0,
+            46,
+            "SEARCH s USING INDEX sqlite_autoindex_sources_1 (extraction_id=?)"
+          ]
+        ]
+      }
+    ],
+    "missing_id_queries": 1,
+    "missing_id_fetched_rows": 0,
+    "internal_rows_bytes_and_opcodes_measured": true,
+    "field_byte_budget": "record-count pagination, no arbitrary field-byte truncation"
+  }
+}

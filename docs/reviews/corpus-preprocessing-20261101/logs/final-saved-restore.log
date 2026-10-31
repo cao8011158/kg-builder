@@ -1,0 +1,35 @@
+{
+  "downloads": {
+    "research_knowledge.sqlite3": {
+      "sha256": "1b8671a71cb8ff7bb4677e9bce27b6ca54b1e9f3b5946404a0ea8fe226b01757",
+      "bytes": 10768384,
+      "integrity": "ok",
+      "fk": "ok"
+    },
+    "retrieval_semantic.sqlite3": {
+      "sha256": "db1b994f1efc89785ca5557a800e2293f4d091e0dc1a161c823febeb6397d0c5",
+      "bytes": 10784768,
+      "integrity": "ok",
+      "fk": "ok"
+    }
+  },
+  "code_head": "9b7905462f3afb28f26fc9ccd9ab9d2d310059c7",
+  "master": {
+    "papers": 365,
+    "extractions": 211,
+    "historical_payloads_preserved": 46
+  },
+  "semantic": {
+    "sources": 171,
+    "mentions": 538,
+    "entities": 393,
+    "contributions": 171
+  },
+  "restored_search_stats": {
+    "embedding_cache_hits": 570,
+    "embeddings_computed": 0,
+    "dense_index_builds": 4,
+    "detail_rows": 3
+  },
+  "restore_hybrid_and_pagination": "pass"
+}
