@@ -133,7 +133,8 @@
               "type": "string",
               "pattern": "\\S"
             },
-            "uniqueItems": true
+            "uniqueItems": true,
+            "minItems": 1
           },
           "name": {
             "type": "string",
@@ -168,7 +169,8 @@
               "type": "string",
               "pattern": "\\S"
             },
-            "uniqueItems": true
+            "uniqueItems": true,
+            "minItems": 1
           },
           "name": {
             "type": "string",
@@ -207,7 +209,8 @@
               "type": "string",
               "pattern": "\\S"
             },
-            "uniqueItems": true
+            "uniqueItems": true,
+            "minItems": 1
           },
           "identity_scope": {
             "type": "string",
@@ -247,7 +250,8 @@
               "type": "string",
               "pattern": "\\S"
             },
-            "uniqueItems": true
+            "uniqueItems": true,
+            "minItems": 1
           },
           "name": {
             "type": "string",
@@ -304,7 +308,8 @@
               "type": "string",
               "pattern": "\\S"
             },
-            "uniqueItems": true
+            "uniqueItems": true,
+            "minItems": 1
           },
           "name": {
             "type": "string",
@@ -340,7 +345,8 @@
               "type": "string",
               "pattern": "\\S"
             },
-            "uniqueItems": true
+            "uniqueItems": true,
+            "minItems": 1
           },
           "name": {
             "type": "string",
@@ -387,7 +393,8 @@
               "type": "string",
               "pattern": "\\S"
             },
-            "uniqueItems": true
+            "uniqueItems": true,
+            "minItems": 1
           },
           "identity_scope": {
             "type": "string",
@@ -472,7 +479,8 @@
               "type": "string",
               "pattern": "\\S"
             },
-            "uniqueItems": true
+            "uniqueItems": true,
+            "minItems": 1
           },
           "description": {
             "type": "string",
@@ -525,7 +533,8 @@
             "pattern": "\\S"
           }
         }
-      }
+      },
+      "minItems": 1
     },
     "relations": {
       "type": "array",
@@ -557,7 +566,8 @@
               "type": "string",
               "pattern": "\\S"
             },
-            "uniqueItems": true
+            "uniqueItems": true,
+            "minItems": 1
           },
           "assertion_status": {
             "type": "string",

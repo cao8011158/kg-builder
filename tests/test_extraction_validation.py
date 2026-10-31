@@ -82,6 +82,15 @@ class ValidationTests(unittest.TestCase):
         # A declaration of two metrics contradicts the single evaluation metric.
         with self.assertRaisesRegex(ValueError,'conflicts'):
             validate_extraction(conflict)
+        for field in ('contributions','relations'):
+            missing=copy.deepcopy(self.draft)
+            missing[field][0]['evidence_refs']=[]
+            with self.subTest(field=field),self.assertRaisesRegex(ValueError,'schema'):
+                validate_extraction(missing)
+        missing=copy.deepcopy(self.draft)
+        missing['evidence_locators']=[]
+        with self.assertRaisesRegex(ValueError,'schema'):
+            validate_extraction(missing)
 
     def test_legacy_and_unknown_version(self):
         legacy={'paper_id':self.paper,'version_id':self.version,'summary':'',
@@ -170,7 +179,15 @@ class ValidationTests(unittest.TestCase):
         other.execute('UPDATE papers SET arxiv_id=? WHERE paper_id=?',('2501.12345',old_paper))
         other.commit()
         original=draft(old_paper,old_version,self.url)
+        original['summary']=old_version
+        original['methods'][0]['description']=old_version+'#c1'
+        original['extension']={'quote':old_paper,'nested':{'key':old_version+'#e1'}}
         ingest_extraction(other,original)
+        other.execute('INSERT INTO relevance_reviews VALUES(?,?,?,?,?,?,?,?,?)',
+            ('review:alt',old_paper,'pending','draft','abstract','[]','reason',
+             json.dumps({'paper_id':old_paper,'schema_version':'review/v1',
+                         'quote':old_paper,'nested':{'key':old_version}}),'now'))
+        other.commit()
         other.close();self.db.close()
         result=reconcile([self.root/'one.db',alternate],self.root/'combined.db',self.root/'combined.json')
         self.assertEqual(result['counts']['papers'],1)
@@ -181,8 +198,15 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(transformed['contributions'][0]['key'],self.version+'#c1')
         self.assertEqual(transformed['relations'][0]['target'],self.version+'#c1')
         self.assertEqual(transformed['evaluations'][0]['key'],self.version+'#e1')
+        self.assertEqual(transformed['summary'],old_version)
+        self.assertEqual(transformed['methods'][0]['description'],old_version+'#c1')
+        self.assertEqual(transformed['extension'],original['extension'])
         validate_extraction(transformed)
         self.assertEqual(output.execute("SELECT COUNT(*) FROM reconciliation_audit WHERE table_name='extraction_records'").fetchone()[0],1)
+        review=json.loads(output.execute('SELECT payload_json FROM relevance_reviews').fetchone()[0])
+        self.assertEqual(review['paper_id'],self.paper)
+        self.assertEqual(review['quote'],old_paper)
+        self.assertEqual(review['nested']['key'],old_version)
         output.close()
 
 if __name__=='__main__': unittest.main()

@@ -21,24 +21,40 @@ def rows(db, table):
     return [dict(r) for r in db.execute(f'SELECT * FROM {table}')]
 
 
-def remap_payload(raw, old_paper, paper, old_version, version):
-    """Rewrite only structured identifier values; retain exact JSON bytes if unchanged."""
+def remap_payload(raw, old_paper, paper, old_version, version, *, review=False):
+    """Rewrite declared ID fields only; never transform prose or extension values."""
     if old_paper == paper and old_version == version:
-        candidate=json.loads(raw)
-        if isinstance(candidate,dict) and 'schema_version' in candidate:
-            validate_extraction(candidate)
+        if not review:
+            candidate=json.loads(raw)
+            if isinstance(candidate,dict) and 'schema_version' in candidate:
+                validate_extraction(candidate)
         return raw
-    def remap(value):
-        if isinstance(value,str):
-            if old_version and value == old_version: return version
-            if old_version and value.startswith(old_version+'#'):
-                return version+value[len(old_version):]
-            if value == old_paper: return paper
-            return value
-        if isinstance(value,list): return [remap(v) for v in value]
-        if isinstance(value,dict): return {k:remap(v) for k,v in value.items()}
+    def mapped_id(value):
+        if old_version and value == old_version: return version
+        if old_version and value.startswith(old_version+'#'):
+            return version+value[len(old_version):]
+        if value == old_paper: return paper
         return value
-    payload=remap(json.loads(raw))
+    payload=json.loads(raw)
+    if not isinstance(payload,dict):
+        raise ValueError('Structured payload must be a JSON object')
+    if payload.get('paper_id') == old_paper:
+        payload['paper_id']=paper
+    if review:
+        return json.dumps(payload,ensure_ascii=False)
+    if payload.get('version_id') == old_version:
+        payload['version_id']=version
+    if 'schema_version' in payload:
+        for field in ('research_problems','methods','contributions','artifacts',
+                      'benchmarks','metrics','evaluations','findings'):
+            for entity in payload.get(field,[]):
+                entity['key']=mapped_id(entity['key'])
+        for evaluation in payload.get('evaluations',[]):
+            for field in ('target_artifact','benchmark','metric'):
+                evaluation[field]=mapped_id(evaluation[field])
+        for relation in payload.get('relations',[]):
+            relation['source']=mapped_id(relation['source'])
+            relation['target']=mapped_id(relation['target'])
     if isinstance(payload,dict) and 'schema_version' in payload:
         validate_extraction(payload)
     return json.dumps(payload,ensure_ascii=False)
@@ -62,6 +78,7 @@ def reconcile(inputs, output, report):
         expected_columns['paper_redirects']={'input_sha256','original_paper_id','paper_id'}
         for path in inputs:
             db = sqlite3.connect(f'file:{path}?mode=ro', uri=True)
+            dbs.append(db)
             db.row_factory = sqlite3.Row
             if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                 raise ValueError(f'Input failed integrity_check: {path}')
@@ -76,7 +93,6 @@ def reconcile(inputs, output, report):
                 extras=columns-expected_columns[table]
                 if extras:
                     raise ValueError(f'Unsupported input columns in {table}: {sorted(extras)}')
-            dbs.append(db)
             input_tables.append(present)
         datasets = [{t: rows(db,t) if t in input_tables[i] else [] for t in TABLES}
                     for i,db in enumerate(dbs)]
@@ -265,7 +281,7 @@ def reconcile(inputs, output, report):
                         out.execute('INSERT OR IGNORE INTO pipeline_runs VALUES(?,?,?,?,?,?,?,?)',vals)
                     for review in d['relevance_reviews']:
                         target=mapping[(i,review['paper_id'])]
-                        payload=remap_payload(review['payload_json'],review['paper_id'],target,None,None)
+                        payload=remap_payload(review['payload_json'],review['paper_id'],target,None,None,review=True)
                         out.execute('''INSERT OR IGNORE INTO relevance_reviews VALUES(?,?,?,?,?,?,?,?,?)''',
                             (review['review_id'],target,review['decision'],review['review_status'],
                              review['source_scope'],review['topics_json'],review['reason'],payload,
