@@ -254,4 +254,51 @@ class ResolutionTests(unittest.TestCase):
             reconcile([self.path,altered],self.root/'conflict.db',self.root/'conflict.json')
         self.assertFalse((self.root/'conflict.db').exists())
 
+    def test_reconcile_resolution_columns_in_different_order(self):
+        import_resolution_manifest(self.con,self.manifest)
+        self.con.close()
+        reordered=self.root/'reordered.db'
+        shutil.copyfile(self.path,reordered)
+        db=sqlite3.connect(reordered)
+        db.row_factory=sqlite3.Row
+        orders={
+            'entity_resolution_batches':('batch_id','reviewer','schema_version','reviewed_at','manifest_sha256','payload_json'),
+            'entity_resolution_entities':('batch_id','entity_id','payload_json','scope','scope_version_id','kind'),
+            'entity_resolution_mentions':('batch_id','extraction_id','payload_json','mention_path',
+                                          'source_payload_sha256','decision','entity_id','kind'),
+        }
+        original={table:[dict(r) for r in db.execute(f'SELECT * FROM {table}')]
+                  for table in orders}
+        for table,order in orders.items():
+            ddl=db.execute('SELECT sql FROM sqlite_master WHERE name=?',(table,)).fetchone()[0]
+            body=ddl[ddl.index('(')+1:ddl.rindex(')')]
+            chunks=[];depth=0;start=0
+            for n,char in enumerate(body):
+                if char=='(':depth+=1
+                elif char==')':depth-=1
+                elif char==',' and depth==0:
+                    chunks.append(body[start:n].strip());start=n+1
+            chunks.append(body[start:].strip())
+            columns={part.split()[0]:part for part in chunks if part.split()[0] in order}
+            constraints=[part for part in chunks if part.split()[0] not in columns]
+            db.execute('CREATE TABLE reordered ('+','.join([columns[c] for c in order]+constraints)+')')
+            fields=','.join(order)
+            db.execute(f'INSERT INTO reordered({fields}) SELECT {fields} FROM {table}')
+            db.execute(f'DROP TABLE {table}')
+            db.execute(f'ALTER TABLE reordered RENAME TO {table}')
+            db.commit()
+        self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
+        db.close()
+        result=reconcile([reordered],self.root/'ordered-output.db',self.root/'ordered-report.json')
+        out=sqlite3.connect(self.root/'ordered-output.db');out.row_factory=sqlite3.Row
+        for table in orders:
+            self.assertEqual([dict(r) for r in out.execute(f'SELECT * FROM {table}')],original[table])
+        self.assertEqual(out.execute('PRAGMA foreign_key_check').fetchall(),[])
+        self.assertEqual(len(get_resolution_mentions(out,self.manifest['batch_id'],self.eid)),2)
+        out.close()
+        self.assertEqual(result['counts']['entity_resolution_mentions'],2)
+        repeated=reconcile([self.root/'ordered-output.db'],self.root/'ordered-again.db',
+                           self.root/'ordered-again.json')
+        self.assertEqual(repeated['counts']['entity_resolution_mentions'],2)
+
 if __name__=='__main__': unittest.main()

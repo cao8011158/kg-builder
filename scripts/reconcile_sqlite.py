@@ -17,6 +17,14 @@ TABLES = ('papers', 'paper_versions', 'source_records', 'paper_topics',
           'entity_resolution_entities', 'entity_resolution_mentions')
 OPTIONAL_TABLES = {'paper_doi_aliases','relevance_reviews','reconciliation_audit','paper_redirects',
                    'entity_resolution_batches','entity_resolution_entities','entity_resolution_mentions'}
+RESOLUTION_COLUMNS = {
+    'entity_resolution_batches': ('batch_id','schema_version','reviewer','reviewed_at',
+                                  'manifest_sha256','payload_json'),
+    'entity_resolution_entities': ('batch_id','entity_id','kind','scope','scope_version_id',
+                                   'payload_json'),
+    'entity_resolution_mentions': ('batch_id','extraction_id','kind','mention_path',
+                                   'source_payload_sha256','decision','entity_id','payload_json'),
+}
 
 
 def rows(db, table):
@@ -325,27 +333,21 @@ def reconcile(inputs, output, report):
                         if (not original or not current or
                             (original['paper_id'],original['version_id'],original['payload_json']) != tuple(current)):
                             raise ValueError('Annotated extraction ID or payload would change during reconciliation')
-                    for batch in d['entity_resolution_batches']:
-                        vals=tuple(batch.values())
-                        existing=out.execute('SELECT * FROM entity_resolution_batches WHERE batch_id=?',
-                                             (batch['batch_id'],)).fetchone()
-                        if existing and tuple(existing) != vals:
-                            raise ValueError('Conflicting immutable entity resolution batch_id')
-                        if not existing:
-                            out.execute('INSERT INTO entity_resolution_batches VALUES(?,?,?,?,?,?)',vals)
                     for table,key_fields in (
+                        ('entity_resolution_batches',('batch_id',)),
                         ('entity_resolution_entities',('batch_id','entity_id')),
                         ('entity_resolution_mentions',('batch_id','extraction_id','mention_path'))):
                         for row in d[table]:
-                            vals=tuple(row.values())
+                            columns=RESOLUTION_COLUMNS[table]
+                            vals=tuple(row[field] for field in columns)
                             where=' AND '.join(f'{field}=?' for field in key_fields)
-                            existing=out.execute(f'SELECT * FROM {table} WHERE {where}',
+                            existing=out.execute(f'SELECT {",".join(columns)} FROM {table} WHERE {where}',
                                                  tuple(row[field] for field in key_fields)).fetchone()
                             if existing and tuple(existing) != vals:
                                 raise ValueError(f'Conflicting immutable {table} row')
                             if not existing:
                                 marks=','.join('?' for _ in vals)
-                                out.execute(f'INSERT INTO {table} VALUES({marks})',vals)
+                                out.execute(f'INSERT INTO {table} ({",".join(columns)}) VALUES({marks})',vals)
                 if out.execute('PRAGMA foreign_key_check').fetchall():
                     raise ValueError('Reconciled database fails foreign_key_check')
         except BaseException:
