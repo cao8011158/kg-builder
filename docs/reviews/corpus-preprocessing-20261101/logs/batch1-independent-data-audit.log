@@ -1,0 +1,11 @@
+OLD_EXTRACTIONS_UNCHANGED 46 BATCH_REVIEWS 122 NEW_EXTRACTIONS 52
+QUERY SAGE TOP method:sage
+QUERY LoCoMo TOP benchmark:locomo
+QUERY CAT TOP method:cat
+SHARED method:sage 2
+SHARED method:cat 2
+SHARED method:agentswing 2
+PLAN [(5, 0, 62, 'SEARCH mentions USING INDEX mentions_entity (entity_id=?)')]
+ENTITY_KINDS {'Benchmark': 33, 'Method': 60, 'ResearchProblem': 46}
+SOURCE_SCOPES {'primary_source_abstract_review': 4, 'abstract_only_metadata_snapshot': 47, 'full_text_selected_sections': 1}
+BATCH1_AUDIT_PASS

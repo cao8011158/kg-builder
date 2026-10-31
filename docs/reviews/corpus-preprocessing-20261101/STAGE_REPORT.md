@@ -1,6 +1,6 @@
 # 全候选池预处理：三个 batch
 
-状态：Batch 1 开始；本 step 尚未完成。
+状态：Batch 1 已通过第 1 轮正式审阅；Batch 2 开发完成，正在独立复核；本 step 尚未完成。
 
 ## 固定范围与权限
 
@@ -48,3 +48,29 @@
 SAGE、CAT、SWE-Compressor、AgentSwing 的预印本／正式出版描述按具体机制关联同一 Method，未仅凭标题合并 Paper。LME 保留独立、窄定义的临时评测身份，未推断不可靠别名。所有候选包、审阅决定与输入数据保存在私有任务目录；公开报告只保留计数和哈希。
 
 下一步固定提交与 batch1-data-receipt.json，独立复跑当前 62 项测试，并验证 122 条筛选覆盖、52 条源／版本 pin、旧 46 条提取逐字节保留、关键共享实体、重复导入幂等和当前规模查询。尚未宣布正式 review 通过。
+
+## Batch 1 — 第 1/3 轮正式独立审阅：通过
+
+固定远端提交 `e20e63698d80b16e5ba6c0edd2f487f444e11aa4`，已取回并核对本地内容一致。当前快速回归 62/62 通过；独立检查 122 条筛选与固定清单完全一致、58 include／63 exclude／1 pending，52 个新提取符合 v0.3。原有 46 条 extraction payload 逐字节未变；重复执行结果 master_new=0、sidecar_imported=0。
+
+语义库独立核对：58 来源、199 描述关联、139 实体，其中 46 问题／60 方法／33 benchmark。SAGE、CAT、AgentSwing 均跨两份来源关联同一 Method；SAGE、LoCoMo、CAT 的实际混合检索首项正确。实际 SQLite 计划通过 mentions_entity 索引定位相关描述，外键和 integrity_check 均通过。没有确认未解决的阻塞缺陷；NSP-05 因主来源不可读仍 pending，不计为已提取。
+
+已保存完整批次检查点（含主库／sidecar 一致备份、输入、所有语义审阅和哈希清单），恢复包 SHA-256 为 `aff27ce39d8cbebc2d74fb5f479e8a81e2df5c2664dc7e3e400d7d8a1fbee4a7`。证据：logs/batch1-fixed-head-regression.log、logs/batch1-independent-data-audit.log、logs/batch1-repeat.log。接下来进入 Batch 2 的 122 条；不重做已处理数据，不重建全量问题分组。
+
+合并 gate 已实际执行：唯一 BLOCKED 原因为当前任务没有 main 合并授权；没有测试、日志或审阅缺失。该 gate 不执行合并，本轮继续已授权数据处理，不把 BLOCKED 伪称 READY。
+
+## Batch 2 — 已启动
+
+独立固定清单 122 条（part1/part2 各 61），没有复用项；两个提取子 Agent 与独立 scope 检查并行阅读原始摘要。沿用 Batch 1 的分类修正，提取版本为 2026-11-01-corpus-batch2-v1；当前尚未写入本批主库或语义数据。
+
+## Batch 2 — 两个分片开发完成
+
+part1 开发者 corpus_b1_part1 检查 61 条，36 include／25 exclude；part2 开发者 corpus_b1_part2 检查 61 条，34 include／27 exclude。当前合计 70 include、52 exclude、0 pending，无复用，70 份新提取已通过开发者 schema、清单覆盖、版本和 source pin 自检。两个分片均未直接修改数据库或生产代码。
+
+补查来源用于 EASE、AutoCompact 及两篇 skill survey；如实区分 primary_source_abstract_review 与原始摘要快照。独立 Agent 先盲读全部 122 条进行 scope 判定，随后复核字段，重点裁决泛 RSI、长期视频记忆与可复用技能的边界。本阶段尚未写入 Batch 2 数据，也尚未正式验收。
+
+## Batch 1 — 补查来源后的追加裁决（第 2 轮准备）
+
+在后续有界来源补查中，NSP-05 的 SSRN 官方索引摘要变得可读；直接正文／PDF 仍被拒绝。来源 Agent、独立 scope Agent 与主 Agent 均确认其为通用 NEXUS 双曲记忆理论及模拟，没有建立 LLM agent 的实质关联，因此由 pending 裁决为 exclude。原 pending 审阅不覆盖，新增一条明确 supersedes_review_id 的来源裁决；四字段提取和语义节点均无新增或变化。Batch 1 当前有效结果为 58 include／64 exclude／0 pending。
+
+依赖该批的 Batch 2 入库暂缓，先固定来源补充证据和当前提交，按同一 Batch 1 历史执行第 2/3 轮审阅，不重置轮次。新增独立数据审计脚本检查全部原始元数据、旧提取 payload、每个来源及 item hash、归属类型和真实查询。审计脚本自测去除了超出实际契约的旧节点别名断言：既有节点允许显式语义匹配新表述，不要求后续每个表述均改写为 canonical alias；这不涉及生产数据修正。
