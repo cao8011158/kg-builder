@@ -1,5 +1,7 @@
 # Work Session Handoff — Research Knowledge Graph (2026-10-31)
 
+> Historical handoff: its six-domain scope is superseded by [the current three-domain scope](CURRENT_RESEARCH_SCOPE.md). Existing pilot data remains historical; do not use this handoff to broaden current discovery or LLM processing.
+
 ## Mission
 
 Create a **research knowledge base** that pre-extracts paper contributions, methods, relationships, important evaluations and findings so that a local LLM Agent can retrieve/compare knowledge without repeatedly reading every paper. The KG links to original paper versions/sections for drill-down. Later compare this against BM25 and dense text retrieval; **do not start the Agent evaluation phase yet**.

@@ -4,9 +4,10 @@ Research paper discovery and storage layer for a scholarly Knowledge Graph. **Th
 
 ## Research scope
 
-First publication on/after **2025-01-01**, across six non-exclusive domains:
-Agent Memory; Context Management & Compression; Tool Use; RL Post-training;
-Recursive Self-improvement; and Skill / Self-improving Skill.
+First publication on/after **2025-01-01**, across three non-exclusive domains:
+Agent Memory; Context Management & Compression; and Skill / Self-improving Skill.
+
+See [the current scope](docs/CURRENT_RESEARCH_SCOPE.md) for inclusion boundaries. General Tool Use, RL Post-training and Recursive Self-improvement are no longer standalone discovery domains.
 
 The corpus is a **candidate metadata pool** until a relevance review is performed.
 
@@ -18,7 +19,7 @@ The corpus is a **candidate metadata pool** until a relevance review is performe
 - `scripts/import_reviewed.py`: accepts JSON extraction records produced and reviewed independently; does not invoke LLM.
 - `src/kg_builder/extraction_api.py`: optional, **disabled, untested** OpenAI-compatible Chat Completions draft extractor for assignment integration. Drafts require human/schema/evidence review; not triggered by collection.
 - `scripts/scheduled_refresh.py` and `src/kg_builder/incremental_update.py`: **disabled/unfinished** scheduled ingestion placeholders. Do not report them as operating background jobs.
-- `config/discovery_queries.json`: initial six-domain queries; each source has different search syntax and must be validated in a network-enabled runtime.
+- `config/discovery_queries.json`: current three-domain queries; each source has different search syntax and must be validated in a network-enabled runtime.
 
 ## Setup
 
