@@ -4,7 +4,7 @@
   "repository": "cao8011158/kg-builder",
   "branch": "work/retrieval-pilot-20261031",
   "base_sha": "24c56654b27b4e7118beb9e8c7a8474ab83f2657",
-  "head_sha": "e20e63698d80b16e5ba6c0edd2f487f444e11aa4",
+  "head_sha": "95eb1f95fa9a06621ab0f39302a9dfed1a5346e8",
   "target_branch": "main",
   "target_sha": "fc114851d5017aed7c8d5477b58b2ff8dac6bbfa",
   "implementation_actor": "corpus_data_team",
@@ -90,6 +90,39 @@
       "exit_code": 0,
       "log": "logs/batch1-independent-data-audit.log",
       "log_sha256": "2258039a7169678639bf15f50495cf4a2a4672a79d210cbda4576113460c60ef"
+    },
+    {
+      "role": "reviewer",
+      "kind": "fast_regression",
+      "head_sha": "95eb1f95fa9a06621ab0f39302a9dfed1a5346e8",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/batch1-round2-fixed-head-regression.log",
+      "log_sha256": "edfd6a65a417825bfbd7bea5793d0a0685649d85bc0dd8aa0b7235e3431f97db"
+    },
+    {
+      "role": "reviewer",
+      "kind": "feature_acceptance",
+      "head_sha": "95eb1f95fa9a06621ab0f39302a9dfed1a5346e8",
+      "command": [
+        "python",
+        "docs/reviews/corpus-preprocessing-20261101/audit_corpus.py",
+        "--through",
+        "1"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/batch1-round2-data-audit.log",
+      "log_sha256": "bf554f88d31544683b88baa1749e0bdca0e7fcc331fd8d82ff59f96355a2a761"
     }
   ],
   "reviews": [
@@ -100,6 +133,14 @@
       "actor": "root",
       "verdict": "pass",
       "counterexample_note": "Independent122scope and52field review plus actual SQLite preservation, idempotence, FK/integrity and SAGE/CAT/LoCoMo queries; scope-insufficient source explicitly pending."
+    },
+    {
+      "round": 2,
+      "head_sha": "95eb1f95fa9a06621ab0f39302a9dfed1a5346e8",
+      "remote_head_sha": "95eb1f95fa9a06621ab0f39302a9dfed1a5346e8",
+      "actor": "root",
+      "verdict": "pass",
+      "counterexample_note": "Recovered primary-indexed abstract independently supports LLM-scope exclusion. Append-only adjudication supersedes preserved pending row; no extraction/semantic changes.62tests and fullsource/itemhash preservation/queryaudit pass."
     }
   ],
   "findings": []

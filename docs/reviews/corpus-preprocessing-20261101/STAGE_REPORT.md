@@ -74,3 +74,19 @@ part1 开发者 corpus_b1_part1 检查 61 条，36 include／25 exclude；part2 
 在后续有界来源补查中，NSP-05 的 SSRN 官方索引摘要变得可读；直接正文／PDF 仍被拒绝。来源 Agent、独立 scope Agent 与主 Agent 均确认其为通用 NEXUS 双曲记忆理论及模拟，没有建立 LLM agent 的实质关联，因此由 pending 裁决为 exclude。原 pending 审阅不覆盖，新增一条明确 supersedes_review_id 的来源裁决；四字段提取和语义节点均无新增或变化。Batch 1 当前有效结果为 58 include／64 exclude／0 pending。
 
 依赖该批的 Batch 2 入库暂缓，先固定来源补充证据和当前提交，按同一 Batch 1 历史执行第 2/3 轮审阅，不重置轮次。新增独立数据审计脚本检查全部原始元数据、旧提取 payload、每个来源及 item hash、归属类型和真实查询。审计脚本自测去除了超出实际契约的旧节点别名断言：既有节点允许显式语义匹配新表述，不要求后续每个表述均改写为 canonical alias；这不涉及生产数据修正。
+
+## Batch 1 — 第 2/3 轮正式独立审阅：通过
+
+固定远端提交 `95eb1f95fa9a06621ab0f39302a9dfed1a5346e8`，本地与远端 tree 一致。62 项快速回归通过；独立审计核对全部原始 papers／paper_versions 及旧 46 个 payload 不变，199 条 mention 的原始 item 与 hash、来源指纹和实体类型一致，SAGE／CAT／LoCoMo 混合检索首项正确，实体明细 limit=1 实际只读 3 行。追加来源裁决与原 pending 行均存在且互相明确引用。Batch 1 有效结果 58 include／64 exclude／0 pending；52 新提取及全部语义结果保持不变。没有未解决阻塞，继续 Batch 2。
+
+## Batch 2 — 范围裁决与字段修正完成
+
+独立盲读 122 条后，与开发者原始判断逐项对照：MedRSI 因持续构造、验证并注册可复用临床能力而纳入；CARL 因跨迭代维护压缩决策上下文而纳入；选择性记忆 survey 在实际读取第 5 节和 6.4 节后确认实质覆盖 agent memory／trajectory compaction，标 full_text_selected_sections。Twin Agent 仅压缩权限分离的通信提示而未管理累积历史，仍排除；FocusGUI 为局部感知适配器，未建立长期历史管理，排除。Zenodo 泛化 skill 文章缺少 LLM 特定证据且主文不可取得，保留 pending。
+
+两个开发者保留 pre-independent／pre-field 文件后修正：MemGUI 从“已发布”改为“构造”数据；ACM 明确 offload 被丢弃的内容；EVAF 不再主张已证实为本论文提出；TGVC／Skill-GNN 标 involved；加入原摘要明确使用的 Memora event streams 诊断资源。独立 Agent 复核全部当前 71 份提取，确认 6 处字段修正及新增 3 份提取，没有未解决字段问题。最终本批 71 include／50 exclude／1 pending，71 新提取；尚未正式验收。
+
+## Batch 2 — 语义整理与提交前验证完成
+
+corpus_resolution 完成 11 个候选包、213 条明确判断：56 条匹配，157 条新建归属对应 156 个新 canonical 实体，0 pending。当前语义库共 129 来源／412 描述关联／295 实体。保留 FOCUS 与旧 Focus 的不同机制身份，也区分不同 SWE、Mind2Web 评测对象；LongMemEval-S 的原始子集保留在 mention。所有决定、候选和来源指纹均留在私有证据包。
+
+corpus_batch_runner 在实际提交 95eb1f95fa9a06621ab0f39302a9dfed1a5346e8 上复跑 6 项定向和 62 项快速全仓测试，均 exit 0；原始日志已收录当前仓库 evidence/logs。当前还需固定远端新提交及 batch2-data-receipt.json，再独立检查累计数据、幂等、当前规模检索和恢复检查点。本批尚未宣告正式 review 通过。

@@ -51,6 +51,12 @@ for b in range(1,a.through+1):
         assert sem.execute('SELECT 1 FROM sources WHERE extraction_id=?',(row['extraction_id'],)).fetchone()
     total_new+=len(ext)
     print('BATCH',b,dict(Counter(x['decision'] for x in reviews)),'new',len(ext),'scopes',dict(Counter(x['source_scope'] for x in ext)))
+# Later source evidence is append-only and preserves the original batch review.
+for x in load('batch1-source-adjudication-reviews.json'):
+    assert x['paper_id'] in seen
+    row=master.execute('SELECT payload_json FROM relevance_reviews WHERE review_id=? AND paper_id=?',('scope-three-domain-batch1-source-adjudication-20261101',x['paper_id'])).fetchone()
+    assert row and json.loads(row[0])==x and x['decision']=='exclude'
+    print('SUPERSEDING_SOURCE_ADJUDICATION',x['paper_id'],x['decision'])
 assert master.execute('SELECT COUNT(*) FROM extraction_records').fetchone()[0]==len(old_records)+total_new
 assert {r[0] for r in sem.execute('SELECT paper_id FROM sources')}==includes
 expected_mentions=expected_contributions=0
