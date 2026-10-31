@@ -1,0 +1,43 @@
+{
+  "batch_id": "corpus-preprocessing-20261101-batch1",
+  "candidate_records": 122,
+  "include": 58,
+  "exclude": 63,
+  "pending": 1,
+  "reused": 6,
+  "new_extractions": 52,
+  "semantic_assignments": 162,
+  "new_entities": 113,
+  "matched_assignments": 48,
+  "semantic_pending": 0,
+  "data_files": {
+    "batch1-input.json": {
+      "sha256": "3872e37a4a764307dc3eb9d08abef207a1f093a65d2f9a27fc528cd021f78481",
+      "bytes": 405386
+    },
+    "batch1-reviews.json": {
+      "sha256": "226d56487f5a4d2107235901aa5ad4e417516102b1f91fe6ba35d749b6734c9c",
+      "bytes": 51245
+    },
+    "batch1-extractions.json": {
+      "sha256": "64bab68d09e657a8bb47040a61244f17eb98e370885da371ac64c766f657c876",
+      "bytes": 95002
+    },
+    "batch1-independent-scope.json": {
+      "sha256": "a8a0824432b4f17be554223181435fd35336b087c2282104b60bb4ccfeb4e5c5",
+      "bytes": 52283
+    },
+    "batch1-field-review.json": {
+      "sha256": "08054c499b49b3d87950cf0fc2446a6da4c34e187b32fb0f99e390a95a8cdd80",
+      "bytes": 28717
+    },
+    "missing_sources.json": {
+      "sha256": "19b8c8fc699390f1dfc1219f9419a44dc8d43cdec30f2984a5af6be9f8ded5d0",
+      "bytes": 22512
+    },
+    "batch1-semantic/summary.json": {
+      "sha256": "b1d3a497c770cc3ea6983f5f48b2f27f0bd03d8418e4d6a25306a31069add9a9",
+      "bytes": 5429
+    }
+  }
+}
