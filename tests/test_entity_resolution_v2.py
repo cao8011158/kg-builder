@@ -192,6 +192,24 @@ class ResolutionV2Tests(unittest.TestCase):
         again=reconcile([self.root/'copy.db'],self.root/'again.db',self.root/'again.json')
         self.assertEqual(again['counts']['entity_resolution_batches'],2)
 
+    def test_v1_opaque_fields_named_like_v2_are_not_interpreted(self):
+        legacy=copy.deepcopy(self.manifest)
+        legacy['batch_id']='batch:v1-opaque'
+        legacy['entities'][0]['parent_problem_ids']=['legacy supplementary value']
+        legacy['entities'][0]['relation_basis']={'legacy_note':'not taxonomy'}
+        for mention in legacy['mentions']:
+            mention['review_outcome']={'legacy_note':'uninterpreted'}
+            mention['component_entity_ids']='opaque legacy detail'
+        import_resolution_manifest(self.con,legacy)
+        entries=get_resolution_mentions(self.con,legacy['batch_id'],self.eid)
+        self.assertFalse(entries[0]['stale'])
+        self.assertNotIn('review_outcome',entries[0])
+        self.assertNotIn('component_entities',entries[0])
+        self.assertEqual(entries[0]['mention']['review_outcome'],{'legacy_note':'uninterpreted'})
+        detail=get_resolution_entity(self.con,legacy['batch_id'],'concept:grpo')
+        self.assertFalse(detail['stale'])
+        self.assertEqual(detail['entity']['parent_problem_ids'],['legacy supplementary value'])
+
     def test_explicit_entity_index_and_unrelated_growth(self):
         manifest=self.v2()
         self.add_entity(manifest,'problem:root','ResearchProblem',parents=[])

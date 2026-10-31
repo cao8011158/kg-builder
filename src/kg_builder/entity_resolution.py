@@ -245,7 +245,15 @@ def _entity_payload(con,batch_id,entity_id,cache):
     return cache[entity_id]
 
 
-def _current_entity(con,batch_id,entity_id,entities,validity,hashes):
+def _batch_version(con,batch_id):
+    row=con.execute('SELECT schema_version FROM entity_resolution_batches WHERE batch_id=?',
+                    (batch_id,)).fetchone()
+    if not row or row[0] not in VALIDATORS:
+        raise ValueError(f'Unknown entity resolution batch/version: {batch_id}')
+    return row[0]
+
+
+def _current_entity(con,batch_id,entity_id,entities,validity,hashes,include_parents):
     """Check only this entity's support and actual parent closure, with shared caching."""
     if entity_id in validity:return validity[entity_id]
     active=set()
@@ -257,7 +265,8 @@ def _current_entity(con,batch_id,entity_id,entities,validity,hashes):
             active.remove(eid)
             entity=entities[eid]
             validity[eid]=own_valid[eid] and all(
-                validity.get(parent,False) for parent in entity.get('parent_problem_ids',[]))
+                validity.get(parent,False) for parent in
+                (entity.get('parent_problem_ids',[]) if include_parents else ()))
             continue
         if eid in validity:continue
         entity=_entity_payload(con,batch_id,eid,entities)
@@ -276,7 +285,7 @@ def _current_entity(con,batch_id,entity_id,entities,validity,hashes):
                 current=False
         own_valid[eid]=current
         stack.append((eid,True))
-        for parent in reversed(entity.get('parent_problem_ids',[])):
+        for parent in reversed(entity.get('parent_problem_ids',[]) if include_parents else ()):
             if parent in active:
                 own_valid[eid]=False  # Defensive for a damaged historical cycle.
             elif parent not in validity:
@@ -289,7 +298,12 @@ def get_resolution_entity(con,batch_id,entity_id):
     con.execute('SAVEPOINT entity_resolution_read')
     try:
         entities={};validity={};hashes={}
-        current=_current_entity(con,batch_id,entity_id,entities,validity,hashes)
+        found=_entity_payload(con,batch_id,entity_id,entities)
+        current=False
+        if found is not None:
+            version=_batch_version(con,batch_id)
+            current=_current_entity(con,batch_id,entity_id,entities,validity,hashes,
+                                    version==SCHEMA_VERSION_V2)
         result={'entity_id':entity_id,'stale':not current,
                 'entity':entities.get(entity_id) if current else None}
         con.execute('RELEASE SAVEPOINT entity_resolution_read')
@@ -307,6 +321,8 @@ def _get_resolution_mentions_snapshot(con,batch_id,extraction_id):
         (batch_id,extraction_id)).fetchall()
     if not mention_rows:
         return []
+    version=_batch_version(con,batch_id)
+    is_v2=version==SCHEMA_VERSION_V2
     source=con.execute('SELECT payload_json FROM extraction_records WHERE extraction_id=?',
                        (extraction_id,)).fetchone()
     current_hash=hashlib.sha256(source[0].encode('utf-8')).hexdigest() if source else None
@@ -317,19 +333,19 @@ def _get_resolution_mentions_snapshot(con,batch_id,extraction_id):
         resolved=None
         mention=_load_json(raw)
         if decision=='resolved' and not stale:
-            stale=not _current_entity(con,batch_id,entity_id,entities,validity,support_hashes)
+            stale=not _current_entity(con,batch_id,entity_id,entities,validity,support_hashes,is_v2)
             if not stale:resolved=entities[entity_id]
         active_components=[]
-        if 'review_outcome' in mention and mention['review_outcome']=='composite_label' and not stale:
+        if is_v2 and mention['review_outcome']=='composite_label' and not stale:
             for component_id in mention['component_entity_ids']:
-                if not _current_entity(con,batch_id,component_id,entities,validity,support_hashes):
+                if not _current_entity(con,batch_id,component_id,entities,validity,support_hashes,is_v2):
                     stale=True
             if not stale:
                 active_components=[entities[cid] for cid in mention['component_entity_ids']]
         item={'batch_id':batch_id,'extraction_id':extraction_id,'mention_path':path,
                        'decision':decision,'entity_id':entity_id,'stale':stale,
                        'entity':resolved,'mention':mention}
-        if 'review_outcome' in mention:
+        if is_v2:
             item.update(review_outcome=mention['review_outcome'],
                         component_entity_ids=mention['component_entity_ids'],
                         component_entities=active_components)
