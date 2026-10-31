@@ -22,3 +22,25 @@
 新增 `research-kg-extraction/0.3-retrieval`，只要求贡献、问题、方法和 benchmark；拒绝旧版冗余字段。方法保留本文角色，benchmark 同时支持 introduced/used，并保留版本或子集。旧 v0.2／legacy 不迁移、不删数据。API 接口默认关闭，返回内容必须符合新协议及输入论文／版本身份。
 
 定向测试 5/5 通过；开发者早期完整回归 37/37，通过后补充版本隔离测试。并发开发出现后最新全套 45 项有 5 个 hnswlib 缺失错误，均来自尚在开发的向量模块，不将此全套记为通过。日志见 `logs/schema-targeted.log` 与 `logs/schema-full.log`。真实 API 请求未运行。下一步：独立检查新协议与兼容性，冻结 Batch 1 提交。
+
+## 阶段 2：Batch 1 第 1/3 轮独立审阅：通过
+
+固定远端提交：`eef0d11ea944ad1241c3a4f0e5ae7e51d5962fd6`（与本地开发提交 `80b1f5db5d5aea06f117ff00565633a0106a2462` 内容树完全一致）。审阅完整基线差异；在独立导出的提交树复跑 38 项测试，全部通过。覆盖 legacy/v0.2、新协议、版本隔离、错误输入、重复导入、批次回滚与离线 reconciliation。新协议不强加完整证据审查；API 默认关闭。
+
+原始日志：`logs/schema-review1.log`。首次独立导出时因目标目录路径写错未能启动测试，保留在 `logs/schema-review-env-failure.log`，纠正目录后复跑成功；该环境错误不计正式失败轮次。没有发现阻塞缺陷。真实 LLM API 未运行；此轮也不声称向量／检索完成。已保存工作分支，不合并 main。
+
+## 阶段 3：Batch 2 向量计算开发完成（工作区未提交）
+
+开发者 vector_development（GPT-6 SOL / medium）。已实现本地 FastEmbed、稳定 ID HNSW 更新／删除、余弦候选重算和稀疏图 Leiden CPM。真实编码得到 384 维归一化 float32；真实 HNSW/Leiden 定向 8/8；当时集成回归 49/49。后续补充模型版本标识与大 k 搜索参数检查，最终测试以冻结提交为准。
+
+安装问题根因：Python 构建配置指定不存在的 clang++；显式使用已安装的 GCC 后 hnswlib 编译成功。模型下载所需 SOCKS 支持已补齐。没有替换 HNSW／Leiden，也未调用付费 API。
+
+工作流仍在开发：主 Agent 发现候选路径尚未接 sparse、混合类型 ANN 可能挤掉目标类型候选，已明确交开发者修正；这属于开发反馈，尚未开始 Batch 2 正式审阅。
+
+## 阶段 4：Batch 2 工作流开发完成（未提交）
+
+开发者 workflow_development（GPT-6 SOL / medium）。新增独立 SQLite 语义 sidecar：按明确 extraction ID 读主库；原始提取、论文版本、角色／子集保留；向量缓存按模型和文本指纹复用；问题聚类只输出候选。方法／benchmark 候选现已接 exact-name、FTS5 sparse、按类型 HNSW dense 与 RRF；审阅 JSON 显式决定新建、匹配或待定，并检查源／候选修订。贡献独立检索。
+
+开发反馈修正：跨类型候选挤占、初始别名 LoCoMo/LOCOMO 同批关联、模型切换后的旧候选、索引更新失败后的同进程恢复。SQL 审阅已提交而索引更新失败时返回 rebuild_required，下一次查询重建受影响类型。分页有边界，初始聚类无静默固定上限。当前工作流定向 7/7、全套 54/54 通过（开发者证据），待主 Agent 在冻结提交独立复跑。
+
+已开始实际数据试验：主库副本导入 5 篇精简提取，未修改旧 40 条。初始 10 条问题使用 k=4、similarity=0.65、CPM resolution=0.1 时错误地得到单一大组；这是参数不合适，未作为最终语义归属。小样本阈值／分辨率对照已保存，后续需 LLM 检查拆分。付费 API 始终关闭。
