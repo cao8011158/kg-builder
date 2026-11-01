@@ -421,6 +421,27 @@ class ProbabilityProjectionTests(unittest.TestCase):
                                 {'membership':'belongs'},confidence=.99)
         self.assertFalse(review_group_members([member],other)[0]['excluded'])
 
+    def test_entity_same_probability_gate_is_specific_to_kind_and_choice(self):
+        pair={'pair_id':'p','kind':'Method','left':{'name':'A'},'right':{'name':'B'}}
+        for kind,choice,probability,expected in (
+            ('Method','same',.60,'same'),('Benchmark','same',.60,'same'),
+            ('Method','same',.59,'pending'),('Method','different',.60,'pending'),
+            ('Method','different',.70,'different'),('ResearchProblem','same',.60,'pending')):
+            with self.subTest(kind=kind,choice=choice,probability=probability):
+                values={'same':0.,'different':0.,'insufficient':0.}
+                values[choice]=probability
+                client=self.PacketClient({'identity':values},{'identity':choice},confidence=.99)
+                self.assertEqual(judge_pairs([{**pair,'kind':kind}],client,same_min_probability=.6)[0]['decision'],expected)
+        low=self.PacketClient({'identity':{'same':.59,'different':.4,'insufficient':.01}},
+                              {'identity':'same'},confidence=.99)
+        self.assertEqual(judge_pairs([pair],low,same_min_probability=.6)[0]['decision'],'pending')
+        self.assertEqual(judge_pairs([pair],low,decision_metric='confidence',same_min_probability=.6)[0]['decision'],'same')
+        self.assertEqual(judge_pairs([pair],self.PacketClient({'identity':{'same':.6,'different':.3,'insufficient':.1}},
+                                              {'identity':'same'}))[0]['decision'],'pending')
+        for invalid in (True,-.1,1.1,float('nan'),float('inf')):
+            with self.subTest(invalid=invalid),self.assertRaises(ValueError):
+                judge_pairs([pair],low,same_min_probability=invalid)
+
     def test_missing_invalid_named_probability_fails_closed(self):
         item={'paper_id':'p','field':'methods','key':'k','input_hash':'h','text':'source','item':{'name':'M'}}
         for distribution in ({'contradicted':.1}, {'supported':float('nan')}, {'supported':'0.9'}):

@@ -96,7 +96,7 @@ def _paper(papers, extraction):
 
 class SnapshotGraph:
     def __init__(self, snapshot_path, job_dir, *, client=None, k=20, batch_size=32,
-                 name_mode='external', model=None, lease_seconds=900, namer=None, name_base_url=None, name_model=None, read_input=True, embedding_cache_dir=None, name_concurrency=3, graph_policy=None, problem_resolution=None, context_format=None):
+                 name_mode='external', model=None, lease_seconds=900, namer=None, name_base_url=None, name_model=None, read_input=True, embedding_cache_dir=None, name_concurrency=3, graph_policy=None, problem_resolution=None, context_format=None, entity_same_min_probability=None):
         self.snapshot_path = Path(snapshot_path).resolve()
         self.job_dir = Path(job_dir).resolve()
         self.job_dir.mkdir(parents=True, exist_ok=True)
@@ -149,6 +149,18 @@ class SnapshotGraph:
         for column, sqltype in (('started_at','REAL'),('finished_at','REAL'),('http_intervals_json','TEXT')):
             if column not in columns:self.db.execute(f'ALTER TABLE jev_requests ADD COLUMN {column} {sqltype}')
         saved = self._meta('snapshot_hash')
+        if entity_same_min_probability is not None and (not isinstance(entity_same_min_probability,(int,float))
+                or isinstance(entity_same_min_probability,bool) or not math.isfinite(entity_same_min_probability)
+                or not 0 <= entity_same_min_probability <= 1):
+            raise ValueError('entity_same_min_probability must be within [0, 1]')
+        saved_same=self._meta('entity_same_min_probability')
+        self.entity_same_min_probability=float(saved_same) if saved_same is not None else (0.7 if saved else 0.6)
+        if entity_same_min_probability is not None:
+            if saved and float(entity_same_min_probability)!=self.entity_same_min_probability:
+                raise ValueError('Graph job entity_same_min_probability cannot be changed')
+            self.entity_same_min_probability=float(entity_same_min_probability)
+        if not math.isfinite(self.entity_same_min_probability) or not 0 <= self.entity_same_min_probability <= 1:
+            raise ValueError('Invalid saved entity_same_min_probability')
         if problem_resolution is not None and (not isinstance(problem_resolution,(int,float)) or isinstance(problem_resolution,bool)
                                               or not math.isfinite(problem_resolution) or problem_resolution <= 0):
             raise ValueError('Positive finite problem_resolution required')
@@ -195,6 +207,7 @@ class SnapshotGraph:
                 self._set_meta('decision_metric',self.decision_metric)
                 self._set_meta('context_format',self.context_format)
                 self._set_meta('problem_resolution',str(self.problem_resolution))
+                self._set_meta('entity_same_min_probability',str(self.entity_same_min_probability))
         elif self._meta('snapshot_stat') != stamp:
             # The full file was read above and both canonical and byte digests matched.
             # A restored copy can have a new path/mtime without changing the input.
@@ -357,7 +370,8 @@ class SnapshotGraph:
                                      'paper_id':r['paper_id'],'version_id':r['version_id'],'title':r['title'],
                                      'source_url':r['source_url'],'source_hash':r['source_hash'],'source':json.loads(r['source_json'])}
                 inputs = [{'pair_id':r['pair_id'],'kind':r['kind'],'left':mentions[r['left_id']], 'right':mentions[r['right_id']]} for r in rows]
-                try:results = judge_pairs(inputs,self.client,decision_metric=self.decision_metric,context_format=self.context_format)
+                try:results = judge_pairs(inputs,self.client,decision_metric=self.decision_metric,context_format=self.context_format,
+                                          same_min_probability=self.entity_same_min_probability if self.decision_metric=='probability' else None)
                 except Exception as exc:
                     self._record_failure(exc)
                     raise
@@ -851,7 +865,8 @@ class SnapshotGraph:
             with sqlite3.connect(store_path) as db:
                 area_count=db.execute('SELECT count(*) FROM research_areas').fetchone()[0]
         return {'phase':self._meta('phase'),'graph_policy':self.graph_policy,'decision_metric':self.decision_metric,'context_format':self.context_format,
-                'problem_resolution':self.problem_resolution,'snapshot_hash':self._meta('snapshot_hash'),
+                'problem_resolution':self.problem_resolution,'entity_same_min_probability':self.entity_same_min_probability,
+                'snapshot_hash':self._meta('snapshot_hash'),
                 'research_areas':area_count,'retained_memberships':memberships.get(0,0),
                 'excluded_memberships':memberships.get(1,0),'identity_conflicts':json.loads(self._meta('identity_conflicts') or '[]'),
                 'candidate_pairs':counts,'groups':groups,'name_tasks':tasks,'mentions':mention_counts,

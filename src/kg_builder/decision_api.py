@@ -615,8 +615,9 @@ def review_completeness(items, client, min_confidence=0.7, *, decision_metric='p
     return _run(list(items), client, make, consume, category='completeness' if decision_metric == 'probability' else None, context_format=context_format)
 
 
-def judge_pairs(pairs, client, min_confidence=0.7, *, decision_metric='probability', context_format='explicit-v1'):
+def judge_pairs(pairs, client, min_confidence=0.7, *, decision_metric='probability', context_format='explicit-v1', same_min_probability=None):
     _threshold(min_confidence); _metric(decision_metric); _context_format(context_format)
+    if same_min_probability is not None: _threshold(same_min_probability)
     def make(item):
         kind = str(item.get('kind', '')).lower().replace('_', '')
         identity = ('the same concrete research objective or failure mode' if kind == 'researchproblem'
@@ -625,8 +626,11 @@ def judge_pairs(pairs, client, min_confidence=0.7, *, decision_metric='probabili
                                     {'same':'Same entity', 'different':'Distinct entities', 'insufficient':'Evidence cannot resolve identity'})}
     def consume(item, answers, raw):
         answer = answers['identity']
+        kind = str(item.get('kind', '')).lower().replace('_', '')
+        threshold = (same_min_probability if decision_metric == 'probability' and answer['choice'] == 'same'
+                     and kind in ('method', 'benchmark') and same_min_probability is not None else min_confidence)
         return {'pair_id': item['pair_id'], 'decision': answer['choice'] if answer['choice'] != 'insufficient' and
-                _score(answer, answer['choice'], decision_metric) >= min_confidence else 'pending',
+                _score(answer, answer['choice'], decision_metric) >= threshold else 'pending',
                 **({'probability': _score(answer, answer['choice'], decision_metric)}
                    if decision_metric == 'probability' else {}),
                 'confidence': answer['confidence'], 'decision_metric': decision_metric, 'raw': raw}

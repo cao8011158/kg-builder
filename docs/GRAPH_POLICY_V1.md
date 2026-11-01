@@ -4,7 +4,7 @@ The immutable preparation snapshot remains the input. Approved source payloads a
 
 ## Two different operations
 
-Methods and benchmarks use entity resolution: within-kind HNSW candidate neighborhoods, deduplicated candidate pairs, and Jev same/different decisions at the named-option probability >=0.7 threshold for new jobs (historical jobs retain their saved confidence metric). Similarity does not establish identity. Confident same links form provisional components. A pending comparison does not block the whole component.
+Methods and benchmarks use entity resolution: within-kind HNSW candidate neighborhoods and deduplicated candidate pairs. New graph jobs accept Jev SAME at P(same)>=0.60 and DIFFERENT at P(different)>=0.70; the SAME setting is bound to each job. Existing jobs without the setting retain 0.70, including confidence-mode jobs. ResearchProblem identity remains at 0.70. Similarity does not establish identity. Accepted same links form provisional components. A pending comparison does not block the whole component.
 
 Research problems remain distinct source-grounded ResearchProblem nodes. Their whole-snapshot similarity graph is partitioned by Leiden CPM. Its actual clusters, rather than exact-identity links, become candidate research areas. An LLM summarizes each cluster of at least two members into a ResearchArea name and definition. Singleton problems remain searchable without forcing a synthetic area. Area nodes are distinct from their original problem nodes and expose member paper provenance.
 

@@ -326,6 +326,34 @@ class DomainGraphTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'problem_resolution cannot be changed'):
                 main([*args,'--problem-resolution','0.4','status'])
 
+    def test_entity_same_threshold_cli_restore_and_legacy_default(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from scripts.build_snapshot_graph import main
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'snapshot.json';fixture(source)
+            args=['--snapshot',str(source),'--job-dir',str(root/'job')]
+            with redirect_stdout(StringIO()) as output:
+                main([*args,'--entity-same-min-probability','0.65','status'])
+            self.assertEqual(json.loads(output.getvalue())['entity_same_min_probability'],.65)
+            with redirect_stdout(StringIO()) as output:main([*args,'status'])
+            self.assertEqual(json.loads(output.getvalue())['entity_same_min_probability'],.65)
+            with self.assertRaisesRegex(ValueError,'entity_same_min_probability cannot be changed'):
+                main([*args,'--entity-same-min-probability','0.6','status'])
+            job=SnapshotGraph(source,root/'default')
+            self.assertEqual(job.status()['entity_same_min_probability'],.6)
+            job.close()
+            job=SnapshotGraph(source,root/'default')
+            self.assertEqual(job.entity_same_min_probability,.6)
+            with job.db:job.db.execute("DELETE FROM meta WHERE key='entity_same_min_probability'")
+            job.close()
+            job=SnapshotGraph(source,root/'default')
+            self.assertEqual(job.status()['entity_same_min_probability'],.7)
+            job.close()
+            for invalid in (True,-.1,1.1,float('nan'),float('inf')):
+                with self.subTest(invalid=invalid),self.assertRaises(ValueError):
+                    SnapshotGraph(source,root/'invalid',entity_same_min_probability=invalid)
+
     def test_resolution_binding_and_legacy_metric_restore(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);source=root/'snapshot.json';fixture(source)
@@ -359,6 +387,7 @@ class DomainGraphTests(unittest.TestCase):
             root=Path(tmp);source=root/'snapshot.json';fixture(source,n=2)
             def judge(items,client,**kwargs):
                 self.assertEqual(kwargs['context_format'],'explicit-v1')
+                self.assertEqual(kwargs['same_min_probability'],.6)
                 return [{'pair_id':p['pair_id'],'decision':'pending' if p['kind']=='Benchmark' else 'same','raw':{}} for p in items]
             def members(items,client,rejection_threshold=0.7,**kwargs):
                 self.assertEqual(kwargs['context_format'],'explicit-v1')

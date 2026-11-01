@@ -144,7 +144,10 @@ class DomainValidationTests(unittest.TestCase):
                 self.assertEqual(kwargs['decision_metric'],'confidence')
                 return [{'membership_id':i['membership_id'],'choice':'not_belongs','confidence':0.9,
                          'excluded':True,'raw':{}} for i in items]
-            with patch('kg_builder.decision_api.judge_pairs',pairs),patch('kg_builder.decision_api.review_group_members',old_members):
+            def old_pairs(items,client,**kwargs):
+                self.assertIsNone(kwargs['same_min_probability'])
+                return pairs(items,client,**kwargs)
+            with patch('kg_builder.decision_api.judge_pairs',old_pairs),patch('kg_builder.decision_api.review_group_members',old_members):
                 job=SnapshotGraph(source,path,client=object(),k=1,model=FakeEmbedding())
                 self.assertEqual(job.decision_metric,'confidence')
                 job.run()

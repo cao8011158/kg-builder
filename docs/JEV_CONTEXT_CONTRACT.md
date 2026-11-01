@@ -4,7 +4,7 @@ This contract supersedes confidence-based business gates for NEW jobs. Historica
 
 ## Business decisions
 
-Use the probability of the named option for decisions. Support/identity/scope positive and negative gates use >=0.7; member exclusion requires explicit not_belongs with P(not_belongs)>0.7. Exactly0.7 is retained for exclusion. Confidence is a native response statistic kept in raw audit, not an additional probability-mode gate. Completeness remains nonblocking diagnostic information. Missing, nonfinite or malformed probabilities are errors, never an excuse to reuse confidence as probability.
+Use the probability of the named option for decisions. New graph jobs accept Method/Benchmark identity `same` at P(same)>=0.60; `different`, ResearchProblem identity, scope and support retain >=0.70. Direct `judge_pairs` callers retain the 0.70 default unless they supply the separate SAME setting. Existing graph jobs without the saved setting retain 0.70. Member exclusion requires explicit not_belongs with P(not_belongs)>0.7. Exactly 0.7 is retained for exclusion. Confidence is a native response statistic kept in raw audit, not an additional probability-mode gate. Completeness remains nonblocking diagnostic information. Missing, nonfinite or malformed probabilities are errors, never an excuse to reuse confidence as probability.
 
 Old jobs without a metric retain confidence-mode semantics and their audit interpretation. New jobs pin probability-mode semantics; metadata, status and outcomes declare the metric so restore cannot silently change it. Existing numeric argument names can remain compatibility aliases, but documentation and new CLI options must describe the probability meaning explicitly.
 
