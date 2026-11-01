@@ -1,0 +1,43 @@
+{
+  "schema": "full-preparation-plan/1",
+  "since": "2025-01-01",
+  "until": "2026-11-02",
+  "page_size": 100,
+  "openalex_query": "((\"large language model\" OR LLM OR \"language agent\" OR \"language agents\") AND (agent OR agentic)) AND (((memory OR memories)) OR ((\"context compression\" OR \"context compaction\" OR \"context management\" OR \"context engineering\" OR \"context selection\")) OR ((skill OR skills) AND (library OR libraries OR evolution OR evolving OR \"self-improvement\" OR \"self-improving\" OR learning OR procedural OR management OR composition OR retrieval)))",
+  "openalex_search_field": "search.title_and_abstract",
+  "arxiv_query": "((((ti:\"large language model\" OR abs:\"large language model\") OR (ti:LLM OR abs:LLM) OR (ti:\"language agent\" OR abs:\"language agent\") OR (ti:\"language agents\" OR abs:\"language agents\")) AND ((ti:agent OR abs:agent) OR (ti:agentic OR abs:agentic))) AND ((((ti:memory OR abs:memory) OR (ti:memories OR abs:memories))) OR (((ti:\"context compression\" OR abs:\"context compression\") OR (ti:\"context compaction\" OR abs:\"context compaction\") OR (ti:\"context management\" OR abs:\"context management\") OR (ti:\"context engineering\" OR abs:\"context engineering\") OR (ti:\"context selection\" OR abs:\"context selection\"))) OR (((ti:skill OR abs:skill) OR (ti:skills OR abs:skills)) AND ((ti:library OR abs:library) OR (ti:libraries OR abs:libraries) OR (ti:evolution OR abs:evolution) OR (ti:evolving OR abs:evolving) OR (ti:\"self-improvement\" OR abs:\"self-improvement\") OR (ti:\"self-improving\" OR abs:\"self-improving\") OR (ti:learning OR abs:learning) OR (ti:procedural OR abs:procedural) OR (ti:management OR abs:management) OR (ti:composition OR abs:composition) OR (ti:retrieval OR abs:retrieval))))) AND submittedDate:[202501010000 TO 202611022359]",
+  "openalex_windows": [
+    {
+      "since": "2025-01-01",
+      "until": "2025-03-31"
+    },
+    {
+      "since": "2025-04-01",
+      "until": "2025-06-30"
+    },
+    {
+      "since": "2025-07-01",
+      "until": "2025-09-30"
+    },
+    {
+      "since": "2025-10-01",
+      "until": "2025-12-31"
+    },
+    {
+      "since": "2026-01-01",
+      "until": "2026-03-31"
+    },
+    {
+      "since": "2026-04-01",
+      "until": "2026-06-30"
+    },
+    {
+      "since": "2026-07-01",
+      "until": "2026-09-30"
+    },
+    {
+      "since": "2026-10-01",
+      "until": "2026-11-02"
+    }
+  ]
+}

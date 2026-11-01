@@ -122,6 +122,7 @@ class PreparationWorkflow:
           CREATE INDEX IF NOT EXISTS idx_tasks_queued ON tasks(kind,created) WHERE state='queued';
           CREATE INDEX IF NOT EXISTS idx_tasks_expired ON tasks(kind,lease_until,created) WHERE state='leased';
           CREATE INDEX IF NOT EXISTS idx_tasks_paper ON tasks(paper_id,state);
+          CREATE INDEX IF NOT EXISTS idx_tasks_outstanding ON tasks(state) WHERE state IN ('queued','leased');
           CREATE TABLE IF NOT EXISTS decision_audits (id INTEGER PRIMARY KEY AUTOINCREMENT,
             paper_id TEXT NOT NULL,stage TEXT NOT NULL,attempt INTEGER NOT NULL,
             payload_json TEXT NOT NULL,created REAL NOT NULL);
@@ -647,6 +648,10 @@ class PreparationWorkflow:
         try:
             while True:
                 if stop_event and stop_event.is_set():break
+                if producer and producer.done():
+                    # A failed producer cannot leave an open run spinning forever or
+                    # accidentally publish a terminal snapshot.
+                    producer.result()
                 completed=[f for f,_ in workers if f.done()]
                 for f in completed:f.result()
                 workers=[pair for pair in workers if not pair[0].done()]
@@ -656,7 +661,9 @@ class PreparationWorkflow:
                     db.execute("UPDATE papers SET scope_state='queued' WHERE scope_state='processing' AND scope_started<?",(cutoff,))
                     db.execute("UPDATE papers SET review_state='queued' WHERE review_state='processing' AND review_started<?",(cutoff,))
                 state=db.execute('SELECT collection_state FROM run WHERE id=1').fetchone()[0]
-                outstanding=db.execute("SELECT (SELECT count(*) FROM papers WHERE scope_state IN ('queued','processing') OR review_state IN ('queued','processing','repair_queued'))+(SELECT count(*) FROM tasks WHERE state IN ('queued','leased'))").fetchone()[0]
+                outstanding=(bool(db.execute("SELECT 1 FROM papers WHERE scope_state IN ('queued','processing') LIMIT 1").fetchone())
+                    or bool(db.execute("SELECT 1 FROM papers WHERE review_state IN ('queued','processing','repair_queued') LIMIT 1").fetchone())
+                    or bool(db.execute("SELECT 1 FROM tasks WHERE state IN ('queued','leased') LIMIT 1").fetchone()))
                 db.close()
                 if state=='sealed' and outstanding==0:
                     if not workers:break
