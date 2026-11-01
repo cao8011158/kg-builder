@@ -1,0 +1,53 @@
+ValueError: Report path must differ from databases and input files
+----------------------------------------------------------------------
+Ran 163 tests in 40.415s
+
+OK
+{"batch_id": "b1", "stage": "validated", "papers": 1, "extractions": 1, "reviews": 1, "master_new": 0, "sidecar_imported": 0}
+{
+  "started_at": "2026-11-01T23:09:33.271311+00:00",
+  "completed_at": "2026-11-01T23:09:33.314271+00:00",
+  "mode": "api_first_page",
+  "since": "2025-01-01",
+  "until": "2026-11-01",
+  "per_query": 10,
+  "db_before": {
+    "papers": 0,
+    "versions": 0,
+    "extractions": 0,
+    "sources": 0
+  },
+  "db_after": {
+    "papers": 0,
+    "versions": 0,
+    "extractions": 0,
+    "sources": 0
+  },
+  "by_source": {},
+  "queries": [
+    {
+      "source": "openalex",
+      "topic": "memory",
+      "query": "term",
+      "received": 0,
+      "stored": 0,
+      "date_filtered": 0,
+      "unknown_date": 0,
+      "errors": []
+    },
+    {
+      "source": "arxiv",
+      "topic": "memory",
+      "query": "term",
+      "received": 0,
+      "stored": 0,
+      "date_filtered": 0,
+      "unknown_date": 0,
+      "errors": []
+    }
+  ],
+  "successful_queries": 2,
+  "failed_queries": 0
+}
+area_detail_vm cold=(69, 2, 605) warm=(69, 2, 605) unrelated_1000=(69, 2, 605)
+area_search_vm baseline=(207, 0, 400, 'area:memory') unrelated_1000_cold=(18299, 1, 397, 'area:memory') warm=(233, 0, 397, 'area:memory')
