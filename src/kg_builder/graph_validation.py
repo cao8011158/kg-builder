@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sqlite3
 import tempfile
 from collections import Counter, defaultdict
@@ -40,6 +41,13 @@ def validate_graph(snapshot_path, job_dir, cases=None, model=None):
             details.append({'code': code, **context})
     try:
         meta = dict(graph.execute('SELECT key,value FROM meta'))
+        metric=meta.get('decision_metric','confidence')
+        if metric not in ('probability','confidence'):fail('invalid_decision_metric',metric=metric)
+        try:
+            resolution=float(meta.get('problem_resolution',0.05))
+            if not math.isfinite(resolution) or resolution<=0:raise ValueError('invalid resolution')
+        except (ValueError,TypeError):
+            fail('invalid_problem_resolution');resolution=0.05
         if meta.get('snapshot_hash') != snapshot['snapshot_hash'] or meta.get('file_hash') != file_hash:
             fail('snapshot_binding')
         if meta.get('phase') != 'complete':fail('incomplete_graph_phase',phase=meta.get('phase'))
@@ -240,6 +248,9 @@ def validate_graph(snapshot_path, job_dir, cases=None, model=None):
 def _domain_validation(snapshot, job_dir, cases, model, graph, store, meta, mentions,
                        contributions, entities, groups, approved, sources, fail, failures, details):
     """Audit the domain policy's immutable proposals and final retained relationships."""
+    metric=meta.get('decision_metric','confidence')
+    try:resolution=float(meta.get('problem_resolution',0.05))
+    except (ValueError,TypeError):resolution=0.05
     group_members = Counter()
     expected_entities = {}
     expected_assignment = {}
@@ -282,13 +293,25 @@ def _domain_validation(snapshot, job_dir, cases, model, graph, store, meta, ment
             if not isinstance(audit,dict):
                 fail('invalid_member_audit',group_id=gid,mention_id=mid);continue
             confidence=audit.get('confidence')
+            score=audit.get(metric)
             choice=audit.get('choice')
-            expected_excluded=(choice=='not_belongs' and isinstance(confidence,(int,float))
-                               and not isinstance(confidence,bool) and 0 <= confidence <= 1 and confidence>0.7)
+            valid_score=(isinstance(score,(int,float)) and not isinstance(score,bool)
+                         and math.isfinite(score) and 0<=score<=1)
+            expected_excluded=choice=='not_belongs' and valid_score and score>0.7
+            raw=audit.get('raw')
+            raw_answer=raw.get('answers',{}).get('membership') if isinstance(raw,dict) and isinstance(raw.get('answers'),dict) else None
+            probabilities=raw_answer.get('probabilities') if isinstance(raw_answer,dict) else None
+            raw_probability_valid=(metric!='probability' or
+                (isinstance(probabilities,dict) and set(probabilities)=={'belongs','not_belongs','insufficient'}
+                 and all(isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v) and 0<=v<=1
+                         for v in probabilities.values()) and abs(sum(probabilities.values())-1)<=0.02
+                 and score==probabilities['not_belongs'] and raw_answer.get('confidence')==confidence
+                 and raw_answer.get('choice')==choice))
             if (audit.get('membership_id')!='membership:'+digest([gid,mid])[:32]
                 or audit.get('excluded') is not expected_excluded or row['excluded'] not in (0,1)
                 or bool(row['excluded'])!=expected_excluded or choice not in ('belongs','not_belongs','insufficient')
-                or not isinstance(confidence,(int,float)) or isinstance(confidence,bool) or not 0<=confidence<=1
+                or not valid_score or audit.get('decision_metric','confidence')!=metric or not raw_probability_valid
+                or not isinstance(confidence,(int,float)) or isinstance(confidence,bool) or not math.isfinite(confidence) or not 0<=confidence<=1
                 or (group['kind']=='ResearchProblem' and audit.get('area_revision')!=digest([group['name'],group['description']]))
                 or not isinstance(audit.get('raw'),dict)):
                 fail('member_exclusion_evidence',group_id=gid,mention_id=mid)
@@ -391,7 +414,7 @@ def _domain_validation(snapshot, job_dir, cases, model, graph, store, meta, ment
         by_paper={(r['paper_id'],r['item_key']):r['mention_id'] for r in store.execute('SELECT m.mention_id,m.item_key,s.paper_id FROM mentions m JOIN sources s ON s.extraction_id=m.extraction_id WHERE m.kind=?',('ResearchProblem',))}
         rp_vectors={mid:vectors[pid+'::'+key] for (pid,key),mid in by_paper.items()}
         from .problem_clustering import cluster_problem_vectors
-        recalculated=cluster_problem_vectors(rp_vectors,k=int(meta['k']))
+        recalculated=cluster_problem_vectors(rp_vectors,k=int(meta['k']),resolution=resolution)
         actual=sorted(tuple(parsed_groups[gid]) for gid,g in groups.items() if g['kind']=='ResearchProblem' and gid in parsed_groups)
         if proposal['clusters']!=recalculated['clusters'] or actual!=sorted(tuple(c) for c in recalculated['clusters']):
             fail('leiden_partition_mismatch')

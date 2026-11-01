@@ -36,12 +36,20 @@ def fixture(path, n=2):
     return value
 
 
-def pairs(items,client):
+def pairs(items,client,**kwargs):
     return [{'pair_id':p['pair_id'],'decision':'different' if p['kind']=='Benchmark' else 'same','raw':{'test':True}} for p in items]
 
 
-def groups(items,client):
+def groups(items,client,**kwargs):
     return [{'group_id':g['group_id'],'passed':True,'issues':[],'raw':{'test':True}} for g in items]
+
+
+def member_result(item,choice='belongs',probability=0.2,confidence=0.9):
+    return {'membership_id':item['membership_id'],'choice':choice,'probability':probability,
+            'confidence':confidence,'decision_metric':'probability',
+            'excluded':choice=='not_belongs' and probability>0.7,
+            'raw':{'answers':{'membership':{'choice':choice,'confidence':confidence,
+                    'probabilities':{'belongs':1-probability,'not_belongs':probability,'insufficient':0}}}}}
 
 
 class FakeEmbedding:
@@ -120,7 +128,7 @@ class SnapshotGraphTests(unittest.TestCase):
                                 'description':'Source grounded'}
                     finally:
                         with lock:active[0]-=1
-            def distinct(items,client):
+            def distinct(items,client,**kwargs):
                 return [{**r,'decision':'different'} for r in pairs(items,client)]
             with patch('kg_builder.decision_api.judge_pairs',distinct),patch('kg_builder.decision_api.review_groups',groups):
                 job=SnapshotGraph(source,root/'job',client=object(),k=1,model=FakeEmbedding(),
@@ -229,7 +237,7 @@ class SnapshotGraphTests(unittest.TestCase):
                 job.run()
             job.close()
             fixture(source)
-            def incoherent(items,client):
+            def incoherent(items,client,**kwargs):
                 return [{'group_id':g['group_id'],'passed':g['kind']!='Method','issues':['members disagree'] if g['kind']=='Method' else [],'raw':{}} for g in items]
             with patch('kg_builder.decision_api.judge_pairs',pairs),patch('kg_builder.decision_api.review_groups',incoherent):
                 job=SnapshotGraph(source,root/'fresh',client=object(),k=1,model=FakeEmbedding())
@@ -263,7 +271,7 @@ class SnapshotGraphTests(unittest.TestCase):
     def test_generated_name_requires_final_jev_coherence(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);source=root/'snapshot.json';fixture(source)
-            def final_review(items,client):
+            def final_review(items,client,**kwargs):
                 return [{'group_id':g['group_id'],'passed':g['name']!='Unrelated invented claim',
                          'issues':['display conflicts'] if g['name']=='Unrelated invented claim' else [],'raw':{'checked_name':g['name']}} for g in items]
             with patch('kg_builder.decision_api.judge_pairs',pairs),patch('kg_builder.decision_api.review_groups',final_review):
@@ -282,7 +290,7 @@ class SnapshotGraphTests(unittest.TestCase):
     def test_pending_pair_and_stale_lease(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);source=root/'snapshot.json';fixture(source)
-            def uncertain(items,client):
+            def uncertain(items,client,**kwargs):
                 return [{**r,'decision':'pending'} if i==0 else r for i,r in enumerate(pairs(items,client))]
             with patch('kg_builder.decision_api.judge_pairs',uncertain),patch('kg_builder.decision_api.review_groups',groups):
                 job=SnapshotGraph(source,root/'job',client=object(),k=1,model=FakeEmbedding())
@@ -302,12 +310,49 @@ if __name__=='__main__':unittest.main()
 
 
 class DomainGraphTests(unittest.TestCase):
+    def test_cli_resolution_status_and_mismatch(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from scripts.build_snapshot_graph import main
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'snapshot.json';fixture(source)
+            args=['--snapshot',str(source),'--job-dir',str(root/'job')]
+            with redirect_stdout(StringIO()) as output:
+                main([*args,'--problem-resolution','0.3','status'])
+            self.assertEqual(json.loads(output.getvalue())['problem_resolution'],0.3)
+            with redirect_stdout(StringIO()) as output:
+                main([*args,'status'])
+            self.assertEqual(json.loads(output.getvalue())['problem_resolution'],0.3)
+            with self.assertRaisesRegex(ValueError,'problem_resolution cannot be changed'):
+                main([*args,'--problem-resolution','0.4','status'])
+
+    def test_resolution_binding_and_legacy_metric_restore(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'snapshot.json';fixture(source)
+            job=SnapshotGraph(source,root/'job',problem_resolution=0.4)
+            self.assertEqual(job.status()['decision_metric'],'probability')
+            self.assertEqual(job.status()['problem_resolution'],0.4)
+            job.close()
+            with self.assertRaisesRegex(ValueError,'problem_resolution cannot be changed'):
+                SnapshotGraph(source,root/'job',problem_resolution=0.2)
+            job=SnapshotGraph(source,root/'job')
+            self.assertEqual(job.problem_resolution,0.4)
+            with job.db:
+                job.db.execute("DELETE FROM meta WHERE key IN ('decision_metric','problem_resolution')")
+            job.close()
+            job=SnapshotGraph(source,root/'job')
+            self.assertEqual((job.decision_metric,job.problem_resolution),('confidence',0.05))
+            self.assertTrue(job._strict_exclusion({'choice':'not_belongs','confidence':0.9,'probability':0.1}))
+            job.close()
+            for invalid in (0,-1,float('nan'),float('inf'),True):
+                with self.assertRaises(ValueError):SnapshotGraph(source,root/'invalid',problem_resolution=invalid)
+
     def test_leiden_members_and_strict_exclusion_keep_source_nodes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);source=root/'snapshot.json';fixture(source,n=2)
-            def judge(items,client):
+            def judge(items,client,**kwargs):
                 return [{'pair_id':p['pair_id'],'decision':'pending' if p['kind']=='Benchmark' else 'same','raw':{}} for p in items]
-            def members(items,client,rejection_threshold=0.7):
+            def members(items,client,rejection_threshold=0.7,**kwargs):
                 results=[]
                 for item in items:
                     if item['kind']=='ResearchArea':
@@ -315,10 +360,10 @@ class DomainGraphTests(unittest.TestCase):
                         self.assertEqual(item['description'],'Problems concerning memory')
                     excluded=item['member']['name']=='Method 2'
                     borderline=item['member']['name']=='Memory problem 2'
-                    results.append({'membership_id':item['membership_id'],'group_id':item['group_id'],
-                                    'choice':'not_belongs' if excluded or borderline else 'belongs',
-                                    'confidence':0.9 if excluded else (0.7 if borderline else 0.9),
-                                    'excluded':excluded,'raw':{'test':True}})
+                    low_probability=item['member']['name']=='Method 1'
+                    results.append({**member_result(item,'not_belongs' if excluded or borderline or low_probability else 'belongs',
+                                     0.9 if excluded else (0.7 if borderline else 0.2),
+                                     0.1 if excluded else 0.95),'group_id':item['group_id']})
                 return results
             with patch('kg_builder.decision_api.judge_pairs',judge),patch('kg_builder.decision_api.review_group_members',members):
                 job=SnapshotGraph(source,root/'job',graph_policy='domain-v1',client=object(),k=1,model=FakeEmbedding())
@@ -365,7 +410,7 @@ class DomainGraphTests(unittest.TestCase):
     def test_conflicting_different_same_chain_requires_decision(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);source=root/'snapshot.json';fixture(source,n=3)
-            def conflicting(items,client):
+            def conflicting(items,client,**kwargs):
                 method=sorted((p for p in items if p['kind']=='Method'),key=lambda p:(p['left']['mention_id'],p['right']['mention_id']))
                 different=method[0]['pair_id']
                 return [{'pair_id':p['pair_id'],'decision':'different' if p['pair_id']==different else 'same','raw':{}}
@@ -385,9 +430,8 @@ class DomainGraphTests(unittest.TestCase):
                     self_outer.assertIn('thematic ResearchArea',prompt)
                     return {'group_id':state['group_id'],'name':'Memory research area','description':'A field of agent memory'}
             self_outer=self
-            def reviewed(items,client,rejection_threshold=0.7):
-                return [{'membership_id':i['membership_id'],'excluded':False,'choice':'belongs',
-                         'confidence':0.9,'raw':{}} for i in items]
+            def reviewed(items,client,rejection_threshold=0.7,**kwargs):
+                return [member_result(i) for i in items]
             with patch('kg_builder.decision_api.judge_pairs',pairs),patch('kg_builder.decision_api.review_group_members',reviewed):
                 job=SnapshotGraph(source,root/'job',graph_policy='domain-v1',client=object(),k=1,
                                   model=FakeEmbedding(),name_mode='api',namer=Namer())
@@ -403,10 +447,9 @@ class DomainGraphTests(unittest.TestCase):
             root=Path(tmp);source=root/'snapshot.json';fixture(source,n=2)
             def singleton_proposal(vectors,**kwargs):
                 return {'clusters':[[mid] for mid in sorted(vectors)],'edges':[],'diagnostics':{'algorithm':'leiden-cpm'}}
-            def reviewed(items,client,rejection_threshold=0.7):
+            def reviewed(items,client,rejection_threshold=0.7,**kwargs):
                 self.assertTrue(all(i['kind']!='ResearchArea' for i in items))
-                return [{'membership_id':i['membership_id'],'excluded':False,'choice':'belongs',
-                         'confidence':0.9,'raw':{}} for i in items]
+                return [member_result(i) for i in items]
             with patch('kg_builder.snapshot_graph.cluster_problem_vectors',singleton_proposal),\
                  patch('kg_builder.decision_api.judge_pairs',pairs),\
                  patch('kg_builder.decision_api.review_group_members',reviewed):

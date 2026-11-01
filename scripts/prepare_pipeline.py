@@ -19,6 +19,7 @@ def main(argv=None):
     run.add_argument('--until');run.add_argument('--repair-limit',type=int,default=2)
     run.add_argument('--review-policy',choices=['item-v1','legacy-paper'],default='item-v1')
     run.add_argument('--item-max-reviews',type=int,default=2)
+    run.add_argument('--min-probability',type=float,default=.7,help='Minimum probability for new decisions (legacy confidence runs retain saved threshold)')
     run.add_argument('--jev-concurrency',type=int,default=4)
     run.add_argument('--generation-concurrency',type=int,default=3)
     run.add_argument('--scope-workers',type=int,default=2)
@@ -32,6 +33,7 @@ def main(argv=None):
     snap=sub.add_parser('snapshot');snap.add_argument('--output',type=Path,required=True);snap.add_argument('--cache-dir',type=Path)
     a=p.parse_args(argv)
     kw={k:getattr(a,k) for k in ('target','llm_mode','jev_model','batch_size','per_query','since','until','repair_limit','lease_seconds','review_policy','item_max_reviews','jev_concurrency','generation_concurrency','scope_workers','review_workers')} if a.command=='run' else {}
+    if a.command=='run':kw['min_confidence']=a.min_probability
     if a.command=='run' and a.llm_mode=='api':
         if not a.llm_base_url or not a.llm_model:p.error('API mode needs --llm-base-url and --llm-model')
         from kg_builder.extraction_api import OptionalLLMExtractor

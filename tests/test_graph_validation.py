@@ -9,7 +9,7 @@ from unittest.mock import patch
 from kg_builder.graph_validation import validate_graph
 from scripts.validate_snapshot_graph import main as validate_cli
 from kg_builder.snapshot_graph import SnapshotGraph, canonical_hash
-from test_snapshot_graph import FakeEmbedding, fixture, groups, pairs
+from test_snapshot_graph import FakeEmbedding, fixture, groups, pairs, member_result
 
 
 class GraphValidationTests(unittest.TestCase):
@@ -108,9 +108,9 @@ class GraphValidationTests(unittest.TestCase):
 
     def test_coherent_all_pending_has_no_quality_claim(self):
         other=self.root/'pending-job'
-        def pending_pairs(items,client):
+        def pending_pairs(items,client,**kwargs):
             return [{'pair_id':p['pair_id'],'decision':'pending','raw':{}} for p in items]
-        def pending_groups(items,client):
+        def pending_groups(items,client,**kwargs):
             return [{'group_id':g['group_id'],'passed':False,'issues':[],'raw':{}} for g in items]
         with patch('kg_builder.decision_api.judge_pairs',pending_pairs),patch('kg_builder.decision_api.review_groups',pending_groups):
             job=SnapshotGraph(self.snapshot,other,client=object(),k=1,model=FakeEmbedding(),graph_policy='legacy')
@@ -134,19 +134,38 @@ class GraphValidationTests(unittest.TestCase):
 
 
 class DomainValidationTests(unittest.TestCase):
+    def test_old_domain_job_uses_saved_confidence_exclusion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'snapshot.json';fixture(source)
+            path=root/'old';job=SnapshotGraph(source,path,k=1,graph_policy='domain-v1')
+            with job.db:job.db.execute("DELETE FROM meta WHERE key IN ('decision_metric','problem_resolution')")
+            job.close()
+            def old_members(items,client,**kwargs):
+                self.assertEqual(kwargs['decision_metric'],'confidence')
+                return [{'membership_id':i['membership_id'],'choice':'not_belongs','confidence':0.9,
+                         'excluded':True,'raw':{}} for i in items]
+            with patch('kg_builder.decision_api.judge_pairs',pairs),patch('kg_builder.decision_api.review_group_members',old_members):
+                job=SnapshotGraph(source,path,client=object(),k=1,model=FakeEmbedding())
+                self.assertEqual(job.decision_metric,'confidence')
+                job.run()
+                for task in job.claim('test'):
+                    job.submit([{'task_id':task['task_id'],'lease_token':task['lease_token'],
+                                 'input_hash':task['input_hash'],'result':{'group_id':task['group_id'],
+                                 'name':'Memory research area','description':'Temporal recall problems'}}])
+                job.run();job.close()
+            self.assertTrue(validate_graph(source,path)['structural']['passed'])
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.root=Path(self.temp.name);self.snapshot=self.root/'snapshot.json';fixture(self.snapshot)
         self.job_dir=self.root/'job'
-        def member_review(items,client):
+        def member_review(items,client,**kwargs):
             results=[]
             for item in items:
                 kind=item['kind'];name=item['member']['name']
                 choice='not_belongs' if (kind=='ResearchArea' and name.endswith('2')) or kind=='Method' else 'insufficient'
                 confidence=0.8 if kind=='ResearchArea' else 0.7
-                results.append({'membership_id':item['membership_id'],
-                                'choice':choice,'confidence':confidence,'excluded':choice=='not_belongs' and confidence>0.7,
-                                'raw':{'test':True}})
+                results.append(member_result(item,choice,confidence,0.1 if kind=='ResearchArea' else 0.95))
             return results
         with patch('kg_builder.decision_api.judge_pairs',pairs),patch('kg_builder.decision_api.review_group_members',member_review):
             job=SnapshotGraph(self.snapshot,self.job_dir,client=object(),k=1,model=FakeEmbedding(),graph_policy='domain-v1')
@@ -185,6 +204,44 @@ class DomainValidationTests(unittest.TestCase):
         self.assertIn('member_exclusion_evidence',codes)
         self.assertIn('missing_member_review',codes)
 
+    def test_probability_audit_checks_raw_distribution_and_saved_resolution(self):
+        from kg_builder.problem_clustering import cluster_problem_vectors
+        captured=[]
+        def recalculate(vectors,**kwargs):
+            captured.append(kwargs['resolution'])
+            return cluster_problem_vectors(vectors,**kwargs)
+        with patch('kg_builder.problem_clustering.cluster_problem_vectors',side_effect=recalculate):
+            self.assertTrue(self.audit()['structural']['passed'])
+        self.assertEqual(captured,[0.05])
+        with sqlite3.connect(self.job_dir/'graph.sqlite') as db:
+            row=db.execute('SELECT group_id,mention_id,audit FROM member_reviews LIMIT 1').fetchone()
+            audit=json.loads(row[2]);audit['probability']=0.99 if audit['probability']!=0.99 else 0.01
+            db.execute('UPDATE member_reviews SET audit=? WHERE group_id=? AND mention_id=?',
+                       (json.dumps(audit),row[0],row[1]))
+        self.assertIn('member_exclusion_evidence',self.audit()['structural']['failure_counts'])
+
+    def test_nondefault_resolution_recomputed_by_validator(self):
+        from kg_builder.problem_clustering import cluster_problem_vectors
+        path=self.root/'fine';seen=[]
+        def capture(vectors,**kwargs):
+            seen.append(kwargs['resolution'])
+            return cluster_problem_vectors(vectors,**kwargs)
+        def keep(items,client,**kwargs):return [member_result(i) for i in items]
+        with patch('kg_builder.snapshot_graph.cluster_problem_vectors',side_effect=capture),\
+             patch('kg_builder.decision_api.judge_pairs',pairs),\
+             patch('kg_builder.decision_api.review_group_members',keep):
+            job=SnapshotGraph(self.snapshot,path,client=object(),k=1,model=FakeEmbedding(),
+                              graph_policy='domain-v1',problem_resolution=0.3)
+            job.run()
+            for task in job.claim('test'):
+                job.submit([{'task_id':task['task_id'],'lease_token':task['lease_token'],
+                             'input_hash':task['input_hash'],'result':{'group_id':task['group_id'],
+                             'name':'Area','description':'Problem area'}}])
+            job.run();job.close()
+        with patch('kg_builder.problem_clustering.cluster_problem_vectors',side_effect=capture):
+            self.assertTrue(validate_graph(self.snapshot,path)['structural']['passed'])
+        self.assertEqual(seen,[0.3,0.3])
+
     def test_missing_node_area_link_and_proposal(self):
         with sqlite3.connect(self.job_dir/'semantic.sqlite') as db:
             db.execute("DELETE FROM research_area_members")
@@ -204,12 +261,11 @@ class DomainValidationTests(unittest.TestCase):
 
     def test_pending_pair_does_not_freeze_approved_members(self):
         other=self.root/'pending'
-        def uncertain(items,client):
+        def uncertain(items,client,**kwargs):
             return [{**r,'decision':'pending' if item['kind']=='Method' else 'different'}
                     for item,r in zip(items,pairs(items,client))]
-        def retain(items,client):
-            return [{'membership_id':item['membership_id'],'choice':'insufficient','confidence':0.1,
-                     'excluded':False,'raw':{'test':True}} for item in items]
+        def retain(items,client,**kwargs):
+            return [member_result(item,'insufficient',0.1,0.9) for item in items]
         with patch('kg_builder.decision_api.judge_pairs',uncertain),patch('kg_builder.decision_api.review_group_members',retain):
             job=SnapshotGraph(self.snapshot,other,client=object(),k=1,model=FakeEmbedding(),graph_policy='domain-v1')
             job.run()

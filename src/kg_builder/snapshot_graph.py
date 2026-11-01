@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import sqlite3
 import time
@@ -95,7 +96,7 @@ def _paper(papers, extraction):
 
 class SnapshotGraph:
     def __init__(self, snapshot_path, job_dir, *, client=None, k=20, batch_size=32,
-                 name_mode='external', model=None, lease_seconds=900, namer=None, name_base_url=None, name_model=None, read_input=True, embedding_cache_dir=None, name_concurrency=3, graph_policy=None):
+                 name_mode='external', model=None, lease_seconds=900, namer=None, name_base_url=None, name_model=None, read_input=True, embedding_cache_dir=None, name_concurrency=3, graph_policy=None, problem_resolution=None):
         self.snapshot_path = Path(snapshot_path).resolve()
         self.job_dir = Path(job_dir).resolve()
         self.job_dir.mkdir(parents=True, exist_ok=True)
@@ -148,6 +149,20 @@ class SnapshotGraph:
         for column, sqltype in (('started_at','REAL'),('finished_at','REAL'),('http_intervals_json','TEXT')):
             if column not in columns:self.db.execute(f'ALTER TABLE jev_requests ADD COLUMN {column} {sqltype}')
         saved = self._meta('snapshot_hash')
+        if problem_resolution is not None and (not isinstance(problem_resolution,(int,float)) or isinstance(problem_resolution,bool)
+                                              or not math.isfinite(problem_resolution) or problem_resolution <= 0):
+            raise ValueError('Positive finite problem_resolution required')
+        saved_resolution=self._meta('problem_resolution')
+        self.problem_resolution=float(saved_resolution) if saved_resolution is not None else 0.05
+        if problem_resolution is not None:
+            if saved and float(problem_resolution)!=self.problem_resolution:
+                raise ValueError('Graph job problem_resolution cannot be changed')
+            self.problem_resolution=float(problem_resolution)
+        if not math.isfinite(self.problem_resolution) or self.problem_resolution<=0:
+            raise ValueError('Invalid saved problem_resolution')
+        self.decision_metric=self._meta('decision_metric') or ('confidence' if saved else 'probability')
+        if self.decision_metric not in ('probability','confidence'):
+            raise ValueError('Invalid saved decision_metric')
         saved_policy = self._meta('graph_policy')
         self.graph_policy = saved_policy or ('legacy' if saved else (graph_policy or 'domain-v1'))
         if graph_policy is not None and graph_policy != self.graph_policy:
@@ -169,6 +184,8 @@ class SnapshotGraph:
                 self._set_meta('k', str(k))
                 self._set_meta('name_mode', name_mode)
                 self._set_meta('graph_policy', self.graph_policy)
+                self._set_meta('decision_metric',self.decision_metric)
+                self._set_meta('problem_resolution',str(self.problem_resolution))
         elif self._meta('snapshot_stat') != stamp:
             # The full file was read above and both canonical and byte digests matched.
             # A restored copy can have a new path/mtime without changing the input.
@@ -303,7 +320,7 @@ class SnapshotGraph:
                         if mid == other: continue
                         a,b = sorted((mid,other))
                         pairs[(kind,a,b)] = max(pairs.get((kind,a,b),-1),neighbor['similarity'])
-            proposal = cluster_problem_vectors(bykind['ResearchProblem'],k=self.k)
+            proposal = cluster_problem_vectors(bykind['ResearchProblem'],k=self.k,resolution=self.problem_resolution)
             (self.job_dir / 'problem-proposal.json').write_text(json.dumps(proposal,sort_keys=True),encoding='utf-8')
             with self.db:
                 for (kind,a,b),similarity in sorted(pairs.items()):
@@ -331,7 +348,7 @@ class SnapshotGraph:
                                      'paper_id':r['paper_id'],'version_id':r['version_id'],'title':r['title'],
                                      'source_url':r['source_url'],'source_hash':r['source_hash'],'source':json.loads(r['source_json'])}
                 inputs = [{'pair_id':r['pair_id'],'kind':r['kind'],'left':mentions[r['left_id']], 'right':mentions[r['right_id']]} for r in rows]
-                try:results = judge_pairs(inputs,self.client)
+                try:results = judge_pairs(inputs,self.client,decision_metric=self.decision_metric)
                 except Exception as exc:
                     self._record_failure(exc)
                     raise
@@ -383,7 +400,7 @@ class SnapshotGraph:
                 groups.append(group)
             for start in range(0,len(groups),self.batch_size):
                 batch=groups[start:start+self.batch_size]
-                try:results=review_groups(batch,self.client)
+                try:results=review_groups(batch,self.client,decision_metric=self.decision_metric)
                 except Exception as exc:
                     self._record_failure(exc)
                     raise
@@ -455,7 +472,7 @@ class SnapshotGraph:
                                              'source':json.loads(m['source_json'])}})
             for start in range(0,len(inputs),self.batch_size):
                 batch=inputs[start:start+self.batch_size]
-                try:results=review_group_members(batch,self.client)
+                try:results=review_group_members(batch,self.client,decision_metric=self.decision_metric)
                 except Exception as exc:
                     self._record_failure(exc);raise
                 mapping={r['membership_id']:r for r in results}
@@ -465,7 +482,7 @@ class SnapshotGraph:
                     for item in batch:
                         result=mapping[item['membership_id']]
                         self._record_requests(result)
-                        if result.get('excluded') != (result.get('choice')=='not_belongs' and result.get('confidence',0)>0.7):
+                        if result.get('excluded') != self._strict_exclusion(result):
                             raise ValueError('Member exclusion disagrees with strict policy')
                         self.db.execute('INSERT INTO member_reviews VALUES(?,?,?,?)',
                                         (item['group_id'],item['member']['mention_id'],int(result['excluded']),json.dumps(result,sort_keys=True)))
@@ -477,6 +494,23 @@ class SnapshotGraph:
                                         ('name:'+g['group_id'],g['group_id'],time.time()))
                 self._set_meta('phase','grouped')
         finally:store.close()
+
+    def _strict_exclusion(self, result):
+        metric=result.get('decision_metric',self.decision_metric)
+        value=result.get(self.decision_metric)
+        if metric!=self.decision_metric or not isinstance(value,(int,float)) or isinstance(value,bool) or not math.isfinite(value) or not 0<=value<=1:
+            raise ValueError('Member review has invalid decision metric or score')
+        if self.decision_metric=='probability':
+            raw=result.get('raw')
+            answer=raw.get('answers',{}).get('membership') if isinstance(raw,dict) and isinstance(raw.get('answers'),dict) else None
+            probabilities=answer.get('probabilities') if isinstance(answer,dict) else None
+            if (not isinstance(probabilities,dict) or set(probabilities)!={'belongs','not_belongs','insufficient'}
+                or any(not isinstance(v,(int,float)) or isinstance(v,bool) or not math.isfinite(v) or not 0<=v<=1
+                       for v in probabilities.values()) or abs(sum(probabilities.values())-1)>0.02
+                or value!=probabilities['not_belongs'] or result.get('confidence')!=answer.get('confidence')
+                or result.get('choice')!=answer.get('choice') or result.get('decision_metric')!='probability'):
+                raise ValueError('Member probability disagrees with raw Jev answer')
+        return result.get('choice')=='not_belongs' and value>0.7
 
     def _review_area_members(self):
         """Judge area membership only against the actual generated area summary."""
@@ -498,7 +532,7 @@ class SnapshotGraph:
             if inputs and self.client is None:raise ValueError('Jev client required for named area member review')
             for start in range(0,len(inputs),self.batch_size):
                 batch=inputs[start:start+self.batch_size]
-                try:results=review_group_members(batch,self.client)
+                try:results=review_group_members(batch,self.client,decision_metric=self.decision_metric)
                 except Exception as exc:self._record_failure(exc);raise
                 mapping={r['membership_id']:r for r in results}
                 if len(mapping)!=len(results) or set(mapping)!={i['membership_id'] for i in batch}:
@@ -507,7 +541,7 @@ class SnapshotGraph:
                     for item in batch:
                         result=mapping[item['membership_id']]
                         self._record_requests(result)
-                        if result.get('excluded') != (result.get('choice')=='not_belongs' and result.get('confidence',0)>0.7):
+                        if result.get('excluded') != self._strict_exclusion(result):
                             raise ValueError('Area member exclusion disagrees with strict policy')
                         result={**result,'area_revision':digest([item['name'],item['description']])}
                         self.db.execute('INSERT INTO member_reviews VALUES(?,?,?,?)',
@@ -698,7 +732,7 @@ class SnapshotGraph:
                         r=store.db.execute('SELECT name,description,source_json FROM mentions WHERE mention_id=?',(mid,)).fetchone()
                         members.append({'mention_id':mid,'name':r['name'],'description':r['description'],'source':json.loads(r['source_json'])})
                     inputs.append({'group_id':g['group_id'],'kind':g['kind'],'name':g['name'],'description':g['description'],'members':members})
-                try:results=review_groups(inputs,self.client)
+                try:results=review_groups(inputs,self.client,decision_metric=self.decision_metric)
                 except Exception as exc:
                     self._record_failure(exc)
                     raise
@@ -807,7 +841,8 @@ class SnapshotGraph:
         if store_path.exists() and self.graph_policy=='domain-v1' and self._meta('phase')=='complete':
             with sqlite3.connect(store_path) as db:
                 area_count=db.execute('SELECT count(*) FROM research_areas').fetchone()[0]
-        return {'phase':self._meta('phase'),'graph_policy':self.graph_policy,'snapshot_hash':self._meta('snapshot_hash'),
+        return {'phase':self._meta('phase'),'graph_policy':self.graph_policy,'decision_metric':self.decision_metric,
+                'problem_resolution':self.problem_resolution,'snapshot_hash':self._meta('snapshot_hash'),
                 'research_areas':area_count,'retained_memberships':memberships.get(0,0),
                 'excluded_memberships':memberships.get(1,0),'identity_conflicts':json.loads(self._meta('identity_conflicts') or '[]'),
                 'candidate_pairs':counts,'groups':groups,'name_tasks':tasks,'mentions':mention_counts,

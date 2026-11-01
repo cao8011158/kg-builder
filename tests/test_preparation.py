@@ -236,7 +236,7 @@ class ItemPolicyTests(unittest.TestCase):
             self.results.append([x['key'] for x in items])
             return [dict(paper_id=x['paper_id'],field=x['field'],key=x['key'],input_hash=x['input_hash'],
                 passed=not x['key'].endswith('#bad') or len(self.results)>1,
-                confidence=.9,issues=['unsupported'] if x['key'].endswith('#bad') and len(self.results)==1 else [],raw={}) for x in items]
+                confidence=.2,probability=.9,decision_metric='probability',issues=['unsupported'] if x['key'].endswith('#bad') and len(self.results)==1 else [],raw={}) for x in items]
         self.w=PreparationWorkflow(self.tmp.name,target=1,client=object(),scope_fn=scope,review_fn=review_items,embedding=Embedding())
         self.w.add_source(source(50),'arxiv','agent memory','agent_memory');self.w._scope_batch()
     def submit(self,task,payload):
@@ -259,6 +259,9 @@ class ItemPolicyTests(unittest.TestCase):
         db.close();snap=self.w.snapshot(Path(self.tmp.name)/'item.json')
         self.assertEqual(snap['counts']['ready'],1)
         self.assertEqual(len(snap['review_metadata'][task['paper_id']]['items']),2)
+        self.assertEqual(snap['review_metadata'][task['paper_id']]['decision_metric'],'probability')
+        by_key={x['key']:x for x in snap['review_metadata'][task['paper_id']]['items']}
+        self.assertEqual(by_key[task['version_id']+'#c1']['probability'],.9)
 
     def test_empty_is_terminal(self):
         task=self.w.claim()[0];payload=draft(task);payload['contributions']=[]
@@ -273,7 +276,7 @@ class ItemPolicyTests(unittest.TestCase):
     def test_wrong_review_hash_does_not_approve(self):
         task=self.w.claim()[0];self.submit(task,draft(task))
         self.w.review_fn=lambda items,client,min_confidence:[dict(paper_id=x['paper_id'],field=x['field'],key=x['key'],
-            input_hash='wrong',passed=True,confidence=.99,issues=[],raw={}) for x in items]
+            input_hash='wrong',passed=True,confidence=.99,probability=.99,decision_metric='probability',issues=[],raw={}) for x in items]
         with self.assertRaisesRegex(ValueError,'hash'):self.w._review_batch()
         self.assertEqual(self.w.status()['review']['queued'],1)
         db=self.w._db();self.assertEqual(db.execute("SELECT count(*) FROM item_reviews WHERE state='approved'").fetchone()[0],0);db.close()
@@ -368,9 +371,10 @@ class ItemPolicyTests(unittest.TestCase):
         db=self.w._db();error=json.loads(db.execute("SELECT payload_json FROM decision_audits WHERE stage='item_review_error'").fetchone()[0]);db.close()
         self.assertEqual([x['request_id'] for x in error['requests']],['a','b'])
         self.w.review_fn=None
-        def success(items,client,min_confidence):
-            return [dict(paper_id=x['paper_id'],field=x['field'],key=x['key'],input_hash=x['input_hash'],passed=True,confidence=.9,issues=[],raw={}) for x in items]
-        with patch('kg_builder.decision_api.review_items',side_effect=success),patch('kg_builder.decision_api.review_completeness',side_effect=fail):
+        def success(items,client,min_confidence,*,decision_metric):
+            self.assertEqual(decision_metric,'probability')
+            return [dict(paper_id=x['paper_id'],field=x['field'],key=x['key'],input_hash=x['input_hash'],passed=True,confidence=.2,probability=.9,decision_metric='probability',issues=[],raw={}) for x in items]
+        with patch('kg_builder.decision_api.review_items',side_effect=success),patch('kg_builder.decision_api.review_completeness',side_effect=lambda items,client,min_confidence,*,decision_metric:fail(items,client,min_confidence)):
             self.w._review_batch()
         db=self.w._db();diagnostic=json.loads(db.execute("SELECT payload_json FROM decision_audits WHERE stage='completeness'").fetchone()[0]);db.close()
         self.assertEqual([x['request_id'] for x in diagnostic['requests']],['a','b'])
@@ -378,7 +382,7 @@ class ItemPolicyTests(unittest.TestCase):
 
     def test_failed_second_review_drops_only_item(self):
         self.w.review_fn=lambda items,client,min_confidence:[dict(paper_id=x['paper_id'],field=x['field'],key=x['key'],input_hash=x['input_hash'],
-              passed=not x['key'].endswith('#bad'),confidence=.9,issues=['unsupported'],raw={}) for x in items]
+              passed=not x['key'].endswith('#bad'),confidence=.2,probability=.9,decision_metric='probability',issues=['unsupported'],raw={}) for x in items]
         task=self.w.claim()[0];payload=draft(task)
         payload['contributions'].append(dict(key=task['version_id']+'#bad',description='unsupported'))
         self.submit(task,payload);self.w._review_batch()
@@ -389,5 +393,108 @@ class ItemPolicyTests(unittest.TestCase):
         db=self.w._db();row=db.execute('SELECT extraction_json,review_json FROM papers').fetchone();db.close()
         self.assertEqual([x['key'] for x in json.loads(row[0])['contributions']],[task['version_id']+'#c1'])
         self.assertEqual({x['key']:x['state'] for x in json.loads(row[1])['items']}[task['version_id']+'#bad'],'dropped')
+
+    def test_probability_gate_ignores_low_confidence_and_blocks_low_probability(self):
+        task=self.w.claim()[0];payload=draft(task)
+        payload['contributions'].append(dict(key=task['version_id']+'#bad',description='another claim'))
+        self.submit(task,payload)
+        def outcomes(items,client,min_confidence):
+            return [dict(paper_id=x['paper_id'],field=x['field'],key=x['key'],input_hash=x['input_hash'],
+                passed=True,confidence=.05 if x['key'].endswith('#c1') else .99,
+                probability=.92 if x['key'].endswith('#c1') else .15,
+                decision_metric='probability',issues=[],raw={}) for x in items]
+        self.w.review_fn=outcomes;self.w._review_batch()
+        db=self.w._db();rows=db.execute('SELECT item_key,state FROM item_reviews ORDER BY item_key').fetchall()
+        review=json.loads(db.execute('SELECT review_json FROM papers').fetchone()[0]);db.close()
+        self.assertEqual({x['item_key'].split('#')[-1]:x['state'] for x in rows},{'bad':'repair_queued','c1':'approved'})
+        self.assertEqual((review['decision_metric'],review['decision_threshold']),('probability',.7))
+        self.assertEqual({x['key'].split('#')[-1]:x['probability'] for x in review['items']},{'bad':.15,'c1':.92})
+        self.assertEqual(self.w.status()['decision_metric'],'probability')
+
+    def test_missing_probability_fails_closed_and_reopen_keeps_new_metric(self):
+        task=self.w.claim()[0];self.submit(task,draft(task))
+        self.w.review_fn=lambda items,client,min_confidence:[dict(paper_id=x['paper_id'],field=x['field'],
+            key=x['key'],input_hash=x['input_hash'],passed=True,confidence=.99,issues=[],raw={}) for x in items]
+        with self.assertRaisesRegex(ValueError,'probability'):self.w._review_batch()
+        self.assertEqual(self.w.status()['review']['queued'],1)
+        db=self.w._db();attempts=db.execute('SELECT attempts FROM item_reviews').fetchone()[0];db.close()
+        self.assertEqual(attempts,0)
+        reopened=PreparationWorkflow(self.tmp.name,client=object(),review_fn=self.w.review_fn)
+        self.assertEqual(reopened.decision_metric,'probability')
+        self.assertEqual(reopened.config['decision_metric'],'probability')
+
+    def test_invalid_probability_does_not_approve_injected_callback(self):
+        task=self.w.claim()[0];self.submit(task,draft(task))
+        for value in (2,-.1,True,False,float('nan'),float('inf'),'0.95'):
+            with self.subTest(value=value):
+                self.w.review_fn=lambda items,client,min_confidence:[dict(paper_id=x['paper_id'],field=x['field'],
+                    key=x['key'],input_hash=x['input_hash'],passed=True,confidence=.99,
+                    probability=value,decision_metric='probability',issues=[],raw={}) for x in items]
+                with self.assertRaisesRegex(ValueError,'probability'):self.w._review_batch()
+                self.assertEqual(self.w.status()['review']['queued'],1)
+                db=self.w._db();row=db.execute('SELECT state,attempts,approved_json FROM item_reviews').fetchone();db.close()
+                self.assertEqual((row['state'],row['attempts'],row['approved_json']),('queued',0,None))
+                self.assertFalse(self.w._item_passes(dict(passed=True,probability=value,confidence=.99)))
+
+    def test_declared_metric_mismatch_is_technical_error(self):
+        task=self.w.claim()[0];self.submit(task,draft(task))
+        self.w.review_fn=lambda items,client,min_confidence:[dict(paper_id=x['paper_id'],field=x['field'],
+            key=x['key'],input_hash=x['input_hash'],passed=True,confidence=.99,
+            probability=.95,decision_metric='confidence',issues=[],raw={}) for x in items]
+        with self.assertRaisesRegex(ValueError,'metric'):self.w._review_batch()
+        db=self.w._db();row=db.execute('SELECT state,attempts FROM item_reviews').fetchone();db.close()
+        self.assertEqual(tuple(row),('queued',0))
+
+    def test_boolean_decision_threshold_is_invalid(self):
+        with self.assertRaisesRegex(ValueError,'threshold'):
+            PreparationWorkflow(Path(self.tmp.name)/'bool-threshold',client=object(),min_confidence=True)
+
+    def test_native_adapter_receives_probability_metric_and_completeness_is_diagnostic(self):
+        task=self.w.claim()[0];self.submit(task,draft(task));self.w.review_fn=None
+        def native(items,client,min_confidence,*,decision_metric):
+            self.assertEqual((decision_metric,min_confidence),('probability',.7))
+            return [dict(paper_id=x['paper_id'],field=x['field'],key=x['key'],input_hash=x['input_hash'],
+                passed=True,confidence=.01,probability=.95,decision_metric=decision_metric,issues=[],raw={}) for x in items]
+        def diagnostic(items,client,min_confidence,*,decision_metric):
+            self.assertEqual(decision_metric,'probability')
+            return [dict(paper_id=x['paper_id'],completeness={'contributions':dict(passed=False)}) for x in items]
+        with patch('kg_builder.decision_api.review_items',side_effect=native),patch('kg_builder.decision_api.review_completeness',side_effect=diagnostic):
+            self.w._review_batch()
+        self.assertEqual(self.w.status()['review']['ready'],1)
+        db=self.w._db();review=json.loads(db.execute('SELECT review_json FROM papers').fetchone()[0]);db.close()
+        self.assertFalse(review['completeness']['contributions']['passed'])
+
+    def test_legacy_config_without_metric_restores_confidence_gate(self):
+        db=self.w._db()
+        with db:
+            old=dict(self.w.config);old.pop('decision_metric')
+            db.execute('UPDATE run SET config_json=? WHERE id=1',(json.dumps(old),))
+        db.close()
+        old=PreparationWorkflow(self.tmp.name,client=object(),scope_fn=scope,embedding=Embedding())
+        self.assertEqual(old.decision_metric,'confidence')
+        self.assertNotIn('decision_metric',old.status()['config'])
+        task=old.claim()[0];old.submit([dict(task_id=task['task_id'],lease_token=task['lease_token'],
+            input_hash=task['input_hash'],result=draft(task))])
+        def legacy(items,client,min_confidence):
+            return [dict(paper_id=x['paper_id'],field=x['field'],key=x['key'],input_hash=x['input_hash'],
+                passed=True,confidence=.9,issues=[],raw={}) for x in items]
+        old.review_fn=legacy;old._review_batch()
+        self.assertEqual(old.status()['review']['ready'],1)
+        db=old._db();review=json.loads(db.execute('SELECT review_json FROM papers').fetchone()[0]);db.close()
+        self.assertNotIn('decision_metric',review)
+
+    def test_native_scope_adapter_reads_persisted_metric(self):
+        self.w.add_source(source(51),'arxiv','agent memory','agent_memory')
+        db=self.w._db()
+        with db:
+            db.execute("UPDATE papers SET scope_state='queued' WHERE paper_id=(SELECT paper_id FROM papers ORDER BY discovered LIMIT 1)")
+        db.close()
+        self.w.scope_fn=None
+        def classify(items,client,min_confidence,*,decision_metric):
+            self.assertEqual((decision_metric,min_confidence),('probability',.7))
+            return scope(items,client,min_confidence)
+        with patch('kg_builder.decision_api.classify_scope',side_effect=classify):
+            self.w._scope_batch()
+        self.assertEqual(self.w.status()['papers']['include'],2)
 
 if __name__=='__main__':unittest.main()

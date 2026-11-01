@@ -16,6 +16,7 @@ def main(argv=None):
     parser.add_argument('--k',type=int)
     parser.add_argument('--name-mode',choices=['external','api'])
     parser.add_argument('--graph-policy',choices=['legacy','domain-v1'])
+    parser.add_argument('--problem-resolution',type=float)
     parser.add_argument('--name-base-url')
     parser.add_argument('--name-model')
     parser.add_argument('--embedding-cache-dir',type=Path)
@@ -39,7 +40,7 @@ def main(argv=None):
             settings=dict(db.execute("SELECT key,value FROM meta WHERE key IN ('k','name_mode')"))
         k=k if k is not None else int(settings['k'])
         name_mode=name_mode or settings['name_mode']
-    job=SnapshotGraph(args.snapshot,args.job_dir,client=client,k=k or 20,name_mode=name_mode or 'external',batch_size=getattr(args,'batch_size',32),name_concurrency=getattr(args,'name_concurrency',3),name_base_url=args.name_base_url,name_model=args.name_model,read_input=args.command=='run',embedding_cache_dir=args.embedding_cache_dir,graph_policy=args.graph_policy)
+    job=SnapshotGraph(args.snapshot,args.job_dir,client=client,k=k or 20,name_mode=name_mode or 'external',batch_size=getattr(args,'batch_size',32),name_concurrency=getattr(args,'name_concurrency',3),name_base_url=args.name_base_url,name_model=args.name_model,read_input=args.command=='run',embedding_cache_dir=args.embedding_cache_dir,graph_policy=args.graph_policy,problem_resolution=args.problem_resolution)
     try:
         if args.command=='run':result=job.run()
         elif args.command=='claim':

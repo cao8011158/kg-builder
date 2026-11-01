@@ -4,6 +4,7 @@ import asyncio
 from datetime import date, datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import secrets
@@ -34,13 +35,18 @@ def _failure_audits(exc, client):
 class PreparationWorkflow:
     def __init__(self, run_dir, *, target=60, llm_mode='external', jev_model='jev-1.14.0',
                  batch_size=5, per_query=100, since='2025-01-01', until=None,
-                 lease_seconds=1800, repair_limit=2, min_confidence=.7,
+                 lease_seconds=1800, repair_limit=2, min_confidence=.7, decision_metric='probability',
                  review_policy='item-v1', item_max_reviews=2, jev_concurrency=4,
                  generation_concurrency=3, scope_workers=2, review_workers=2,
                  client=None, extractor=None, scope_fn=None, review_fn=None,
                  collectors=None, embedding=None):
         if review_policy not in ('item-v1','legacy-paper') or item_max_reviews<1:
             raise ValueError('Invalid review policy or item review budget')
+        if decision_metric not in ('probability','confidence'):
+            raise ValueError('Invalid decision metric')
+        if (not isinstance(min_confidence,(int,float)) or isinstance(min_confidence,bool)
+                or not math.isfinite(min_confidence) or not 0<=min_confidence<=1):
+            raise ValueError('Decision threshold must be finite and between 0 and 1')
         if min(jev_concurrency,generation_concurrency,scope_workers,review_workers)<1:
             raise ValueError('Concurrency budgets must be positive')
         self.run_dir=Path(run_dir)
@@ -50,6 +56,7 @@ class PreparationWorkflow:
         self.config=dict(target=target,llm_mode=llm_mode,jev_model=jev_model,batch_size=batch_size,
                          per_query=per_query,since=since,until=until or datetime.now(timezone.utc).date().isoformat(),
                          lease_seconds=lease_seconds,repair_limit=repair_limit,min_confidence=min_confidence,
+                         decision_metric=decision_metric,
                          review_policy=review_policy,item_max_reviews=item_max_reviews,
                          jev_concurrency=jev_concurrency,generation_concurrency=generation_concurrency,
                          scope_workers=scope_workers,review_workers=review_workers)
@@ -63,6 +70,20 @@ class PreparationWorkflow:
 
     @property
     def item_policy(self):return self.config.get('review_policy','legacy-paper')=='item-v1'
+
+    @property
+    def decision_metric(self):return self.config.get('decision_metric','confidence')
+
+    def _native_decision(self, fn, *args):
+        return fn(*args,min_confidence=self.config['min_confidence'],decision_metric=self.decision_metric)
+
+    def _item_passes(self, outcome):
+        if not outcome.get('passed'):return False
+        value=outcome.get(self.decision_metric)
+        # In particular, an absent P(supported) cannot inherit Jev's confidence.
+        return (isinstance(value,(int,float)) and not isinstance(value,bool)
+                and math.isfinite(value) and 0<=value<=1
+                and value>=self.config['min_confidence'])
 
     def _db(self):
         db=sqlite3.connect(self.path,timeout=30)
@@ -253,7 +274,9 @@ class PreparationWorkflow:
         if items:
             try:
                 client=self.client or JevClient(model=self.config['jev_model'])
-                outcomes={o['paper_id']:o for o in fn(items,client,min_confidence=self.config['min_confidence'])}
+                results=(fn(items,client,min_confidence=self.config['min_confidence']) if self.scope_fn
+                         else self._native_decision(fn,items,client))
+                outcomes={o['paper_id']:o for o in results}
             except Exception as exc:
                 # Transient API failure leaves the items restartable.
                 db=self._db()
@@ -421,7 +444,10 @@ class PreparationWorkflow:
         start=time.time()
         try:
             client=self.client or JevClient(model=self.config['jev_model'])
-            outcomes={o['paper_id']:o for o in fn([dict(paper_id=r['paper_id'],text=r['text'],extraction=json.loads(r['extraction_json'])) for r in rows],client,min_confidence=self.config['min_confidence'])}
+            inputs=[dict(paper_id=r['paper_id'],text=r['text'],extraction=json.loads(r['extraction_json'])) for r in rows]
+            results=(fn(inputs,client,min_confidence=self.config['min_confidence']) if self.review_fn
+                     else self._native_decision(fn,inputs,client))
+            outcomes={o['paper_id']:o for o in results}
         except Exception as exc:
             db=self._db()
             with db:
@@ -478,12 +504,20 @@ class PreparationWorkflow:
                      item=json.loads(x['payload_json']),input_hash=x['input_hash']) for r in rows for x in work[r['paper_id']]]
         expected_keys={(i['paper_id'],i['field'],i['key']) for i in inputs}
         try:
-            outcomes=(self.review_fn or review_items)(inputs,self.client,min_confidence=self.config['min_confidence']) if inputs else []
+            outcomes=(self.review_fn(inputs,self.client,min_confidence=self.config['min_confidence']) if self.review_fn
+                      else self._native_decision(review_items,inputs,self.client)) if inputs else []
             keyed={}
             for o in outcomes:
                 k=(o['paper_id'],o['field'],o['key'])
                 if k in keyed or k not in expected_keys:
                     raise ValueError('Duplicate or unknown review item key')
+                if 'decision_metric' in o and o['decision_metric']!=self.decision_metric:
+                    raise ValueError('Review decision metric does not match run configuration')
+                if self.decision_metric=='probability':
+                    probability=o.get('probability')
+                    if (not isinstance(probability,(int,float)) or isinstance(probability,bool)
+                            or not math.isfinite(probability) or not 0<=probability<=1):
+                        raise ValueError('Missing or malformed review probability')
                 keyed[k]=o
             if len(keyed)!=len(inputs) or any(keyed[(i['paper_id'],i['field'],i['key'])].get('input_hash')!=i['input_hash'] for i in inputs):
                 raise ValueError('Missing item review or wrong review input hash')
@@ -502,7 +536,7 @@ class PreparationWorkflow:
             from .decision_api import review_completeness
             fresh=[dict(paper_id=r['paper_id'],text=r['text'],extraction=json.loads(r['extraction_json'])) for r in rows if not r['attempts']]
             if fresh:
-                try:diagnostics={o['paper_id']:o for o in review_completeness(fresh,self.client,min_confidence=self.config['min_confidence'])}
+                try:diagnostics={o['paper_id']:o for o in self._native_decision(review_completeness,fresh,self.client)}
                 except Exception as exc:
                     diagnostics={x['paper_id']:dict(completeness={field:dict(passed=None,error=type(exc).__name__) for field in ITEM_FIELDS},
                         error=type(exc).__name__,requests=_failure_audits(exc,self.client)) for x in fresh}
@@ -514,7 +548,7 @@ class PreparationWorkflow:
                 for x in work[r['paper_id']]:
                     o=keyed[(r['paper_id'],x['field'],x['item_key'])]
                     attempts=x['attempts']+1
-                    state='approved' if o.get('passed') and float(o.get('confidence',0))>=self.config['min_confidence'] else ('repair_queued' if attempts<self.config['item_max_reviews'] else 'dropped')
+                    state='approved' if self._item_passes(o) else ('repair_queued' if attempts<self.config['item_max_reviews'] else 'dropped')
                     db.execute('''UPDATE item_reviews SET state=?,attempts=?,issues_json=?,approved_json=?
                       WHERE paper_id=? AND field=? AND item_key=? AND input_hash=? AND state='queued' ''',
                       (state,attempts,CANON(o.get('issues',[])),x['payload_json'] if state=='approved' else None,
@@ -529,6 +563,19 @@ class PreparationWorkflow:
                 previous=json.loads(r['review_json']) if r['review_json'] else {}
                 completeness=diagnostics.get(r['paper_id'],{}).get('completeness') or previous.get('completeness') or {field:dict(passed=None,diagnostic_only=True) for field in ITEM_FIELDS}
                 review=dict(policy='item-v1',items=[dict(field=x['field'],key=x['item_key'],state=x['state'],attempts=x['attempts'],input_hash=x['input_hash'],approved_payload_hash=SHA(json.loads(x['approved_json'])) if x['approved_json'] else None,issues=json.loads(x['issues_json'])) for x in items],completeness=completeness)
+                if 'decision_metric' in self.config:
+                    review['decision_metric']=self.decision_metric
+                    review['decision_threshold']=self.config['min_confidence']
+                    previous_items={(x['field'],x['key']):x for x in previous.get('items',[])}
+                    for item in review['items']:
+                        outcome=keyed.get((r['paper_id'],item['field'],item['key']))
+                        if outcome:
+                            item['probability']=outcome.get('probability')
+                            item['confidence']=outcome.get('confidence')
+                        elif (item['field'],item['key']) in previous_items:
+                            prior=previous_items[(item['field'],item['key'])]
+                            item['probability']=prior.get('probability')
+                            item['confidence']=prior.get('confidence')
                 if r['paper_id'] in diagnostics:
                     db.execute('INSERT INTO decision_audits(paper_id,stage,attempt,payload_json,created) VALUES(?,?,?,?,?)',
                         (r['paper_id'],'completeness',1,CANON(diagnostics[r['paper_id']]),now))
@@ -564,6 +611,7 @@ class PreparationWorkflow:
         try:
             run=dict(db.execute('SELECT * FROM run WHERE id=1').fetchone())
             return dict(run_id=run['run_id'],collection_state=run['collection_state'],config=json.loads(run['config_json']),
+               decision_metric=self.decision_metric,
                jev_concurrency=json.loads(run['jev_stats_json']) if run['jev_stats_json'] else getattr(self.client,'concurrency_stats',None),
                papers={r[0]:r[1] for r in db.execute('SELECT scope_state,count(*) FROM papers GROUP BY scope_state')},
                review={r[0]:r[1] for r in db.execute('SELECT review_state,count(*) FROM papers GROUP BY review_state')},

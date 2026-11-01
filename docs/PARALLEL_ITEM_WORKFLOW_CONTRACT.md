@@ -1,5 +1,8 @@
 # Parallel item review workflow — 2026-11-01
 
+Historical step contract. New probability-based gates and projected/shared Jev inputs are specified in [JEV_CONTEXT_CONTRACT.md](JEV_CONTEXT_CONTRACT.md); old run semantics remain readable.
+
+
 Baseline: 01fd0078afd326247a47cc16a561b9c16922fa13. This is a new authorized development step, not a restart of the previous three review rounds. It supersedes the paper-wide field gate for NEW runs only. Historical runs and reports remain truthful/readable.
 
 ## Shared API component

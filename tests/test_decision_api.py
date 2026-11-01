@@ -44,7 +44,7 @@ class DecisionTests(unittest.TestCase):
                                           ('belongs',1,False),('insufficient',1,False)]:
             with self.subTest(choice=choice,confidence=confidence):
                 client=FakeClient({'membership':choice},confidence)
-                result=review_group_members([item],client)[0]
+                result=review_group_members([item],client,decision_metric='confidence')[0]
                 self.assertEqual(result['excluded'],excluded)
                 self.assertEqual((result['choice'],result['confidence']),(choice,confidence))
                 self.assertEqual(result['membership_id'],'g:m')
@@ -129,7 +129,7 @@ class DecisionTests(unittest.TestCase):
             max_concurrency=2
             def decide(self, state, questions):
                 barrier.wait()
-                if state['items'][0]['pair_id']=='0': time.sleep(.03)
+                if len(questions)==24: time.sleep(.03)
                 return super().decide(state,questions)
         client=ConcurrentFake({'identity':'same'})
         pairs=[{'pair_id':str(i),'kind':'Method','left':{},'right':{}} for i in range(25)]
@@ -143,7 +143,7 @@ class DecisionTests(unittest.TestCase):
             max_concurrency=2
             def decide(self,state,questions):
                 barrier.wait()
-                if state['items'][0]['pair_id']=='24':
+                if len(questions)==1:
                     error=RuntimeError('request failed')
                     error.request_audit={'request_id':'failed','status':'http_error'}
                     raise error
@@ -160,8 +160,8 @@ class DecisionTests(unittest.TestCase):
         result=review_extractions([{'paper_id':'p','text':'source','extraction':extraction}],
             FakeClient({'adequacy_contributions':'omission'}))[0]
         self.assertFalse(result['passed'])  # Retained paper-wide legacy field.
-        self.assertEqual(result['item_results'],[{'field':'contributions','key':'stable','index':0,
-            'choice':'supported','confidence':.9,'passed':True}])
+        self.assertEqual([(r['field'],r['key'],r['passed'],r['probability']) for r in result['item_results']],
+                         [('contributions','stable',True,1.0)])
         self.assertEqual(result['completeness']['contributions']['choice'],'omission')
         item={'paper_id':'p','field':'methods','key':'m1','text':'source','item':{'name':'Method'},'input_hash':'abc'}
         reviewed=review_items([item],FakeClient())[0]
@@ -231,7 +231,8 @@ class DecisionTests(unittest.TestCase):
         result=classify_scope([paper],yes)[0]
         self.assertEqual((result['decision'],result['topics']),('include',['agent_memory']))
         self.assertEqual(len(yes.calls[0][1]),4)
-        self.assertEqual(classify_scope([paper],FakeClient(confidence=.4))[0]['decision'],'pending')
+        self.assertEqual(classify_scope([paper],FakeClient(confidence=.4))[0]['decision'],'include')
+        self.assertEqual(classify_scope([paper],FakeClient(confidence=.4),decision_metric='confidence')[0]['decision'],'pending')
         extraction={'contributions':[{'description':'claim'}],'research_problems':[],'methods':[],'benchmarks':[]}
         item={'paper_id':'p1','text':'Supplied source','extraction':extraction}
         self.assertTrue(review_extractions([item],FakeClient())[0]['passed'])
@@ -280,10 +281,10 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(len(client.calls),1)
         for qid, question in client.calls[0][1].items():
             index=int(qid[1]); instructions=question['instructions']
-            self.assertIn(f'state.items[{index}].text',instructions)
-            self.assertIn(f'ID "p{index}"',instructions)
+            self.assertIn(f'state.sources[state.items[{index}].source].text',instructions)
+            self.assertNotIn(f'ID "p{index}"',instructions)
             self.assertNotIn('state.items[INDEX]',instructions)
-            self.assertNotIn(f'state.items[{1-index}].text',instructions)
+            self.assertNotIn(f'state.items[{1-index}].source',instructions)
 
         review=FakeClient()
         items=[{'paper_id':f'p{i}','text':f'Source {i}', 'extraction':{
@@ -292,8 +293,8 @@ class DecisionTests(unittest.TestCase):
         review_extractions(items,review)
         for qid, question in review.calls[0][1].items():
             index=int(qid[1]); instructions=question['instructions']
-            self.assertIn(f'state.items[{index}].text',instructions)
-            self.assertIn(f'ID "p{index}"',instructions)
+            self.assertIn(f'state.sources[state.items[{index}].source].text',instructions)
+            self.assertNotIn(f'ID "p{index}"',instructions)
             suffix=qid.split('_',1)[1]
             field=suffix.removeprefix('adequacy_').rsplit('_',1)[0] if not suffix.startswith('adequacy_') else suffix.removeprefix('adequacy_')
             self.assertIn(f'state.items[{index}].extraction.{field}',instructions)
@@ -307,12 +308,176 @@ class DecisionTests(unittest.TestCase):
         judge_pairs(pairs,client)
         self.assertIn('concrete research objective or failure mode',client.calls[0][1]['i0_identity']['instructions'])
         self.assertIn('actual method or benchmark identity',client.calls[0][1]['i1_identity']['instructions'])
-        self.assertIn('state.items[1].left',client.calls[0][1]['i1_identity']['instructions'])
+        self.assertIn('state.entities[state.items[1].left]',client.calls[0][1]['i1_identity']['instructions'])
         groups=[{'group_id':'a','kind':'ResearchProblem','members':[], 'name':'A','description':'B'},
                 {'group_id':'b','kind':'Benchmark','members':[], 'name':'C','description':'D'}]
         client=FakeClient()
         review_groups(groups,client)
         self.assertIn('concrete research objective or failure mode',client.calls[0][1]['i0_coherence']['instructions'])
         self.assertIn('state.items[1].members',client.calls[0][1]['i1_coherence']['instructions'])
+
+
+class ProbabilityProjectionTests(unittest.TestCase):
+    class PacketClient(FakeClient):
+        def __init__(self, probabilities=None, choices=None, confidence=.1):
+            super().__init__(choices, confidence)
+            self.distributions = probabilities or {}
+        def decide(self, state, questions):
+            response = super().decide(state, questions)
+            for qid, answer in response['answers'].items():
+                suffix = qid.split('_', 1)[1]
+                if suffix in self.distributions:
+                    answer['probabilities'] = self.distributions[suffix]
+            return response
+
+    def test_named_probability_gates_and_legacy(self):
+        item={'paper_id':'p','field':'methods','key':'secret-key','input_hash':'secret-hash',
+              'text':'Evidence', 'item':{'name':'Method','description':'Claim','roles':['used']}}
+        high=self.PacketClient({'support':{'supported':.91,'contradicted':.04,'insufficient':.05}}, confidence=.02)
+        approved=review_items([item],high)[0]
+        self.assertTrue(approved['passed'])
+        self.assertEqual((approved['probability'],approved['confidence'],approved['decision_metric']),(.91,.02,'probability'))
+        low=self.PacketClient({'support':{'supported':.69,'contradicted':.2,'insufficient':.11}},confidence=.99)
+        self.assertFalse(review_items([item],low)[0]['passed'])
+        self.assertTrue(review_items([item],low,decision_metric='confidence')[0]['passed'])
+        self.assertNotIn('probability',review_items([item],low,decision_metric='confidence')[0])
+        pair={'pair_id':'private-pair','kind':'Benchmark','left':{'name':'A'},'right':{'name':'B'}}
+        different=self.PacketClient({'identity':{'same':.15,'different':.8,'insufficient':.05}},
+                                    {'identity':'different'},confidence=.01)
+        self.assertEqual(judge_pairs([pair],different)[0]['decision'],'different')
+        self.assertEqual(judge_pairs([pair],different,decision_metric='confidence')[0]['decision'],'pending')
+        member={'membership_id':'private-membership','group_id':'private-group','kind':'Method',
+                'name':'M','description':'Group',
+                'member':{'mention_id':'private-mention','name':'N','description':'Claim','source':{'paper_id':'private-paper'}}}
+        for negative, expected in ((.7,False),(.700001,True)):
+            client=self.PacketClient({'membership':{'belongs':.1,'not_belongs':negative,'insufficient':.2}},
+                                     {'membership':'not_belongs'},confidence=.01)
+            self.assertEqual(review_group_members([member],client)[0]['excluded'],expected)
+        other=self.PacketClient({'membership':{'belongs':.1,'not_belongs':.85,'insufficient':.05}},
+                                {'membership':'belongs'},confidence=.99)
+        self.assertFalse(review_group_members([member],other)[0]['excluded'])
+
+    def test_missing_invalid_named_probability_fails_closed(self):
+        item={'paper_id':'p','field':'methods','key':'k','input_hash':'h','text':'source','item':{'name':'M'}}
+        for distribution in ({'contradicted':.1}, {'supported':float('nan')}, {'supported':'0.9'}):
+            with self.subTest(distribution=distribution):
+                with self.assertRaisesRegex(ValueError,'named Choice probability'):
+                    review_items([item],self.PacketClient({'support':distribution},confidence=1))
+        with self.assertRaisesRegex(ValueError,'decision_metric'):
+            review_items([item],FakeClient(),decision_metric='unknown')
+
+    def test_semantic_packets_shared_and_local_bindings(self):
+        sentinel='UNSENT_ADMIN_SENTINEL'
+        items=[{'paper_id':'private-paper','field':'methods','key':f'private-{i}',
+                'input_hash':sentinel,'text':'same source text',
+                'item':{'name':f'Item {i}','description':'Claim','roles':['used'],
+                        'section':sentinel,'source_url':sentinel,'extractor':sentinel}}
+               for i in range(8)]
+        client=self.PacketClient()
+        output=review_items(items,client)
+        self.assertEqual([r['key'] for r in output],[x['key'] for x in items])
+        state,qs=client.calls[0]
+        self.assertEqual((len(state['sources']),len(state['items']),len(qs)),(1,8,8))
+        packet=json.dumps({'state':state,'questions':qs},ensure_ascii=False)
+        self.assertEqual(packet.count('same source text'),1)
+        for private in (sentinel,'private-paper','private-0','source_url','extractor'):
+            self.assertNotIn(private,packet)
+        items[7]['text']='different source text'
+        client=self.PacketClient();review_items(items,client)
+        self.assertEqual(len(client.calls[0][0]['sources']),2)
+        self.assertEqual(client.calls[0][0]['items'][-1]['source'],1)
+        items[7]['text']='same source text'; items[7]['paper_id']='other paper'
+        client=self.PacketClient();review_items(items,client)
+        self.assertEqual(len(client.calls[0][0]['sources']),2)
+        a={'mention_id':'private-A','name':'A','description':'Shared object','paper_id':sentinel}
+        pairs=[{'pair_id':f'private-pair-{i}','kind':'Method','left':a,
+                'right':{'mention_id':f'private-B-{i}','name':'B','description':str(i),
+                         'source_hash':sentinel}} for i in range(20)]
+        client=self.PacketClient();out=judge_pairs(pairs,client)
+        state,questions=client.calls[0]
+        self.assertEqual((len(state['entities']),len(state['items']),len(questions)),(21,20,20))
+        self.assertEqual(len({entry['left'] for entry in state['items']}),1)
+        self.assertEqual([r['pair_id'] for r in out],[p['pair_id'] for p in pairs])
+        self.assertNotIn(sentinel,json.dumps({'state':state,'questions':questions}))
+        self.assertNotIn('private-A',json.dumps({'state':state,'questions':questions}))
+
+    def test_scope_completeness_groups_and_legacy_wire(self):
+        scope={'paper_id':'PRIVATE_SCOPE','title':'A source title','text':'Source evidence',
+               'source_hash':'ADMIN_SENTINEL'}
+        probabilities={'agent':{'yes':.91,'no':.04,'insufficient':.05},
+                       'memory':{'yes':.84,'no':.1,'insufficient':.06},
+                       'context':{'yes':.1,'no':.85,'insufficient':.05},
+                       'skills':{'yes':.1,'no':.85,'insufficient':.05}}
+        client=self.PacketClient(probabilities,{'agent':'yes','memory':'yes','context':'no','skills':'no'},confidence=.1)
+        self.assertEqual(classify_scope([scope],client)[0]['decision'],'include')
+        self.assertEqual(classify_scope([scope],client,decision_metric='confidence')[0]['decision'],'pending')
+        state=client.calls[0][0]
+        self.assertEqual(state['sources'],[{'title':'A source title','text':'Source evidence'}])
+        self.assertNotIn('PRIVATE_SCOPE',json.dumps(client.calls[0]))
+        self.assertEqual(client.calls[1][0]['items'][0]['paper_id'],'PRIVATE_SCOPE')
+        extraction={'contributions':[{'name':'A','description':'Claim','key':'ADMIN_SENTINEL'}],
+                    'research_problems':[],'methods':[],'benchmarks':[],'schema_version':'ADMIN_SENTINEL'}
+        diagnostic={'paper_id':'PRIVATE_SCOPE','text':'Source evidence','extraction':extraction,
+                    'extractor':'ADMIN_SENTINEL'}
+        client=self.PacketClient({'adequacy_contributions':{'adequate':.95,'omission':.03,'insufficient':.02}},confidence=.01)
+        self.assertTrue(review_completeness([diagnostic],client)[0]['completeness']['contributions']['passed'])
+        self.assertTrue(review_extractions([diagnostic],client)[0]['item_results'][0]['passed'])
+        for state,_ in client.calls:
+            self.assertNotIn('ADMIN_SENTINEL',json.dumps(state))
+            self.assertEqual(state['items'][0]['extraction']['contributions'][0]['name'],'A')
+        group={'group_id':'PRIVATE_GROUP','kind':'Benchmark','name':'Benchmark','description':'Description',
+               'members':[{'mention_id':'PRIVATE_MENTION','name':'Dataset','description':'Version one',
+                           'version_or_subset':'v1','paper_id':'ADMIN_SENTINEL'}]}
+        client=self.PacketClient({'coherence':{'coherent':.9,'incoherent':.05,'insufficient':.05}},confidence=.1)
+        self.assertTrue(review_groups([group],client)[0]['passed'])
+        state,questions=client.calls[0]
+        self.assertEqual(state['entities'][state['items'][0]['members'][0]]['version_or_subset'],'v1')
+        self.assertNotIn('PRIVATE_GROUP',json.dumps({'state':state,'questions':questions}))
+        self.assertNotIn('ADMIN_SENTINEL',json.dumps({'state':state,'questions':questions}))
+
+    def test_nested_source_benchmark_version_is_semantic(self):
+        entity={'mention_id':'private-m','name':'Benchmark','description':'Evaluation suite',
+                'source':{'version_or_subset':'SWE-bench Verified','quote':'Verified benchmark excerpt',
+                          'key':'ADMIN_SENTINEL',
+                          'paper_id':'PRIVATE_PAPER','source_hash':'ADMIN_SENTINEL'}}
+        pair={'pair_id':'private-p','kind':'Benchmark','left':entity,
+              'right':{'mention_id':'private-n','name':'Benchmark','description':'Other variant',
+                       'source':{'version_or_subset':'SWE-bench Lite','key':'ADMIN_SENTINEL'}}}
+        client=self.PacketClient();judge_pairs([pair],client)
+        state,questions=client.calls[0]
+        self.assertEqual([e['version_or_subset'] for e in state['entities']],
+                         ['SWE-bench Verified','SWE-bench Lite'])
+        self.assertEqual(state['entities'][0]['quote'],'Verified benchmark excerpt')
+        self.assertNotIn('ADMIN_SENTINEL',json.dumps({'state':state,'questions':questions}))
+        self.assertNotIn('PRIVATE_PAPER',json.dumps({'state':state,'questions':questions}))
+        member={'membership_id':'private-membership','group_id':'private-g','kind':'Benchmark',
+                'name':'Benchmark','description':'Collection', 'member':entity}
+        client=self.PacketClient();review_group_members([member],client)
+        state,questions=client.calls[0]
+        self.assertEqual(state['entities'][0]['version_or_subset'],'SWE-bench Verified')
+        self.assertNotIn('ADMIN_SENTINEL',json.dumps({'state':state,'questions':questions}))
+
+    def test_projected_budget_and_oversized_semantic_item(self):
+        admin='z'*50000
+        items=[{'paper_id':'p','field':'methods','key':str(i),'input_hash':admin,
+                'text':'source','item':{'name':'M','description':'claim','status':admin}} for i in range(8)]
+        client=self.PacketClient();review_items(items,client)
+        self.assertEqual(len(client.calls),1)
+        self.assertLess(len(json.dumps(client.calls[0][0],ensure_ascii=False)),40000)
+        huge=dict(items[0],item={'name':'M','description':'x'*40001})
+        with self.assertRaisesRegex(ValueError,'bounded'):
+            review_items([huge],self.PacketClient())
+        # Split a large shared registry and rebuild item references against each packet.
+        shared={'mention_id':'A','name':'A','description':'Y'*12000}
+        pairs=[{'pair_id':str(i),'kind':'Method','left':shared,
+                'right':{'mention_id':str(i),'name':'B','description':'Z'*12000}} for i in range(3)]
+        client=self.PacketClient();judge_pairs(pairs,client)
+        self.assertGreater(len(client.calls),1)
+        for state,questions in client.calls:
+            for item in state['items']:
+                self.assertEqual(state['entities'][item['left']]['name'],'A')
+                self.assertEqual(state['entities'][item['right']]['name'],'B')
+            self.assertLessEqual(len(json.dumps(state,ensure_ascii=False)),40000)
+            self.assertLessEqual(len(json.dumps({'model':'jev-1.14.0','state':state,'questions':questions},ensure_ascii=False).encode()),60000)
 
 if __name__=='__main__': unittest.main()

@@ -1,0 +1,31 @@
+test_boolean_decision_threshold_is_invalid (tests.test_preparation.ItemPolicyTests.test_boolean_decision_threshold_is_invalid) ... ok
+test_concurrent_identical_submission_is_accepted_then_duplicate (tests.test_preparation.ItemPolicyTests.test_concurrent_identical_submission_is_accepted_then_duplicate) ... ok
+test_declared_metric_mismatch_is_technical_error (tests.test_preparation.ItemPolicyTests.test_declared_metric_mismatch_is_technical_error) ... ok
+test_empty_is_terminal (tests.test_preparation.ItemPolicyTests.test_empty_is_terminal) ... ok
+test_failed_second_review_drops_only_item (tests.test_preparation.ItemPolicyTests.test_failed_second_review_drops_only_item) ... ok
+test_invalid_probability_does_not_approve_injected_callback (tests.test_preparation.ItemPolicyTests.test_invalid_probability_does_not_approve_injected_callback) ... ok
+test_jev_stats_survive_reopen_and_terminal_replay (tests.test_preparation.ItemPolicyTests.test_jev_stats_survive_reopen_and_terminal_replay) ... ok
+test_keyed_repair_freezes_approved_and_partial_snapshot (tests.test_preparation.ItemPolicyTests.test_keyed_repair_freezes_approved_and_partial_snapshot) ... ok
+test_legacy_config_without_metric_restores_confidence_gate (tests.test_preparation.ItemPolicyTests.test_legacy_config_without_metric_restores_confidence_gate) ... ok
+test_missing_probability_fails_closed_and_reopen_keeps_new_metric (tests.test_preparation.ItemPolicyTests.test_missing_probability_fails_closed_and_reopen_keeps_new_metric) ... ok
+test_native_adapter_receives_probability_metric_and_completeness_is_diagnostic (tests.test_preparation.ItemPolicyTests.test_native_adapter_receives_probability_metric_and_completeness_is_diagnostic) ... ok
+test_native_scope_adapter_reads_persisted_metric (tests.test_preparation.ItemPolicyTests.test_native_scope_adapter_reads_persisted_metric) ... ok
+test_parallel_api_extractors_share_claim_validator (tests.test_preparation.ItemPolicyTests.test_parallel_api_extractors_share_claim_validator) ... ok
+test_parallel_scope_claims_overlap_without_duplicates (tests.test_preparation.ItemPolicyTests.test_parallel_scope_claims_overlap_without_duplicates) ... ok
+test_plural_error_audits_and_diagnostic_failure_are_retained (tests.test_preparation.ItemPolicyTests.test_plural_error_audits_and_diagnostic_failure_are_retained) ... ok
+test_probability_gate_ignores_low_confidence_and_blocks_low_probability (tests.test_preparation.ItemPolicyTests.test_probability_gate_ignores_low_confidence_and_blocks_low_probability) ... ok
+test_source_change_revokes_approval (tests.test_preparation.ItemPolicyTests.test_source_change_revokes_approval) ... ok
+test_wrong_review_hash_does_not_approve (tests.test_preparation.ItemPolicyTests.test_wrong_review_hash_does_not_approve) ... ok
+test_append_only_audit_and_recovered_transient_error (tests.test_preparation.PreparationTests.test_append_only_audit_and_recovered_transient_error) ... ok
+test_balanced_sources_topics_and_resume_without_refetch (tests.test_preparation.PreparationTests.test_balanced_sources_topics_and_resume_without_refetch) ... ok
+test_claim_duplicate_stale_source_and_repair (tests.test_preparation.PreparationTests.test_claim_duplicate_stale_source_and_repair) ... ok
+test_claim_locality_ignores_completed_same_kind_tasks (tests.test_preparation.PreparationTests.test_claim_locality_ignores_completed_same_kind_tasks) ... ok
+test_repair_limit_and_expired_lease (tests.test_preparation.PreparationTests.test_repair_limit_and_expired_lease) ... ok
+test_shortfall_and_stop_before_loop (tests.test_preparation.PreparationTests.test_shortfall_and_stop_before_loop) ... ok
+test_streaming_snapshot_and_restart (tests.test_preparation.PreparationTests.test_streaming_snapshot_and_restart) ... ok
+test_terminal_replay_preserves_first_completion_and_work (tests.test_preparation.PreparationTests.test_terminal_replay_preserves_first_completion_and_work) ... ok
+
+----------------------------------------------------------------------
+Ran 26 tests in 6.216s
+
+OK
