@@ -29,3 +29,9 @@ Batching is based on the actual projected serialized state and questions. Preser
 ## Research area granularity
 
 Expose --problem-resolution and the matching constructor parameter. Persist effective resolution in a graph job and reuse it for validation and restore; reject an explicit incompatible override. Old missing values mean0.05. Keep a compatibility default rather than claim a new optimum without sample testing. The desired finer research areas are decided; which higher resolution gives useful stable subareas is left to the later authorized experiment. Vectors, k20, edge cutoff, seed and clustering algorithm remain unchanged in this step.
+
+## Explicit references after live fault isolation
+
+New probability jobs pin `context_format=explicit-v1`. Pair questions contain the projected left/right object facts and literal kind directly, while retaining the shared semantic state; this matches the live-tested successful input variant. Other questions use code-resolved literal source/group paths and explicit member facts, rather than asking Jev to evaluate nested registry lookups. Large shared evidence stays in state once. Budgets account for the final question text and rebuild references after splitting. Data containing path-shaped text is never rewritten.
+
+Historical jobs without a saved format retain `registry-v1`; confidence mode retains its historical unprojected wire. Reopening must not silently mix formats. Native workflow/graph adapters pass their pinned format; injected callbacks retain existing signatures. Thresholds, schema, candidate inventories, graph contradiction handling and completeness policy are unchanged. The live21-request diagnosis supported fixing references, not forcing every request to have one anchor or clearing all shared state.

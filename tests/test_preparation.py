@@ -371,10 +371,10 @@ class ItemPolicyTests(unittest.TestCase):
         db=self.w._db();error=json.loads(db.execute("SELECT payload_json FROM decision_audits WHERE stage='item_review_error'").fetchone()[0]);db.close()
         self.assertEqual([x['request_id'] for x in error['requests']],['a','b'])
         self.w.review_fn=None
-        def success(items,client,min_confidence,*,decision_metric):
+        def success(items,client,min_confidence,*,decision_metric,context_format):
             self.assertEqual(decision_metric,'probability')
             return [dict(paper_id=x['paper_id'],field=x['field'],key=x['key'],input_hash=x['input_hash'],passed=True,confidence=.2,probability=.9,decision_metric='probability',issues=[],raw={}) for x in items]
-        with patch('kg_builder.decision_api.review_items',side_effect=success),patch('kg_builder.decision_api.review_completeness',side_effect=lambda items,client,min_confidence,*,decision_metric:fail(items,client,min_confidence)):
+        with patch('kg_builder.decision_api.review_items',side_effect=success),patch('kg_builder.decision_api.review_completeness',side_effect=lambda items,client,min_confidence,*,decision_metric,context_format:fail(items,client,min_confidence)):
             self.w._review_batch()
         db=self.w._db();diagnostic=json.loads(db.execute("SELECT payload_json FROM decision_audits WHERE stage='completeness'").fetchone()[0]);db.close()
         self.assertEqual([x['request_id'] for x in diagnostic['requests']],['a','b'])
@@ -420,6 +420,7 @@ class ItemPolicyTests(unittest.TestCase):
         db=self.w._db();attempts=db.execute('SELECT attempts FROM item_reviews').fetchone()[0];db.close()
         self.assertEqual(attempts,0)
         reopened=PreparationWorkflow(self.tmp.name,client=object(),review_fn=self.w.review_fn)
+        self.assertEqual(reopened.status()['context_format'],'explicit-v1')
         self.assertEqual(reopened.decision_metric,'probability')
         self.assertEqual(reopened.config['decision_metric'],'probability')
 
@@ -451,12 +452,14 @@ class ItemPolicyTests(unittest.TestCase):
 
     def test_native_adapter_receives_probability_metric_and_completeness_is_diagnostic(self):
         task=self.w.claim()[0];self.submit(task,draft(task));self.w.review_fn=None
-        def native(items,client,min_confidence,*,decision_metric):
+        def native(items,client,min_confidence,*,decision_metric,context_format):
             self.assertEqual((decision_metric,min_confidence),('probability',.7))
+            self.assertEqual(context_format,'explicit-v1')
             return [dict(paper_id=x['paper_id'],field=x['field'],key=x['key'],input_hash=x['input_hash'],
                 passed=True,confidence=.01,probability=.95,decision_metric=decision_metric,issues=[],raw={}) for x in items]
-        def diagnostic(items,client,min_confidence,*,decision_metric):
+        def diagnostic(items,client,min_confidence,*,decision_metric,context_format):
             self.assertEqual(decision_metric,'probability')
+            self.assertEqual(context_format,'explicit-v1')
             return [dict(paper_id=x['paper_id'],completeness={'contributions':dict(passed=False)}) for x in items]
         with patch('kg_builder.decision_api.review_items',side_effect=native),patch('kg_builder.decision_api.review_completeness',side_effect=diagnostic):
             self.w._review_batch()
@@ -467,11 +470,12 @@ class ItemPolicyTests(unittest.TestCase):
     def test_legacy_config_without_metric_restores_confidence_gate(self):
         db=self.w._db()
         with db:
-            old=dict(self.w.config);old.pop('decision_metric')
+            old=dict(self.w.config);old.pop('decision_metric');old.pop('context_format')
             db.execute('UPDATE run SET config_json=? WHERE id=1',(json.dumps(old),))
         db.close()
         old=PreparationWorkflow(self.tmp.name,client=object(),scope_fn=scope,embedding=Embedding())
         self.assertEqual(old.decision_metric,'confidence')
+        self.assertEqual(old.context_format,'registry-v1')
         self.assertNotIn('decision_metric',old.status()['config'])
         task=old.claim()[0];old.submit([dict(task_id=task['task_id'],lease_token=task['lease_token'],
             input_hash=task['input_hash'],result=draft(task))])
@@ -483,6 +487,26 @@ class ItemPolicyTests(unittest.TestCase):
         db=old._db();review=json.loads(db.execute('SELECT review_json FROM papers').fetchone()[0]);db.close()
         self.assertNotIn('decision_metric',review)
 
+    def test_probability_run_without_format_keeps_registry_and_rejects_invalid_saved_format(self):
+        db=self.w._db()
+        with db:
+            old=dict(self.w.config);old.pop('context_format')
+            db.execute('UPDATE run SET config_json=? WHERE id=1',(json.dumps(old),))
+        db.close()
+        restored=PreparationWorkflow(self.tmp.name,client=object())
+        self.assertEqual((restored.decision_metric,restored.context_format),('probability','registry-v1'))
+        self.assertEqual(restored.status()['context_format'],'registry-v1')
+        seen=[]
+        restored._native_decision(lambda *args,**kwargs:seen.append(kwargs),[],object())
+        self.assertEqual((seen[0]['decision_metric'],seen[0]['context_format']),('probability','registry-v1'))
+        db=restored._db()
+        with db:
+            old['context_format']='invalid'
+            db.execute('UPDATE run SET config_json=? WHERE id=1',(json.dumps(old),))
+        db.close()
+        with self.assertRaisesRegex(ValueError,'saved context format'):
+            PreparationWorkflow(self.tmp.name,client=object())
+
     def test_native_scope_adapter_reads_persisted_metric(self):
         self.w.add_source(source(51),'arxiv','agent memory','agent_memory')
         db=self.w._db()
@@ -490,8 +514,9 @@ class ItemPolicyTests(unittest.TestCase):
             db.execute("UPDATE papers SET scope_state='queued' WHERE paper_id=(SELECT paper_id FROM papers ORDER BY discovered LIMIT 1)")
         db.close()
         self.w.scope_fn=None
-        def classify(items,client,min_confidence,*,decision_metric):
+        def classify(items,client,min_confidence,*,decision_metric,context_format):
             self.assertEqual((decision_metric,min_confidence),('probability',.7))
+            self.assertEqual(context_format,'explicit-v1')
             return scope(items,client,min_confidence)
         with patch('kg_builder.decision_api.classify_scope',side_effect=classify):
             self.w._scope_batch()

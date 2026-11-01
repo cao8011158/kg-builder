@@ -250,7 +250,7 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(len(client.calls),1)
         self.assertEqual(results[1]['raw']['requests'][0]['request_id'],
                          results[2]['raw']['requests'][0]['request_id'])
-        large=[{'pair_id':str(i),'kind':'Method','left':{'name':'A','description':'语'*12000},
+        large=[{'pair_id':str(i),'kind':'Method','left':{'name':'A','description':'语'*8000},
                 'right':{'name':'B'}} for i in range(2)]
         client=FakeClient({'identity':'same'})
         results=judge_pairs(large,client)
@@ -281,7 +281,7 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(len(client.calls),1)
         for qid, question in client.calls[0][1].items():
             index=int(qid[1]); instructions=question['instructions']
-            self.assertIn(f'state.sources[state.items[{index}].source].text',instructions)
+            self.assertIn(f'state.sources[{index}].text',instructions)
             self.assertNotIn(f'ID "p{index}"',instructions)
             self.assertNotIn('state.items[INDEX]',instructions)
             self.assertNotIn(f'state.items[{1-index}].source',instructions)
@@ -293,7 +293,7 @@ class DecisionTests(unittest.TestCase):
         review_extractions(items,review)
         for qid, question in review.calls[0][1].items():
             index=int(qid[1]); instructions=question['instructions']
-            self.assertIn(f'state.sources[state.items[{index}].source].text',instructions)
+            self.assertIn(f'state.sources[{index}].text',instructions)
             self.assertNotIn(f'ID "p{index}"',instructions)
             suffix=qid.split('_',1)[1]
             field=suffix.removeprefix('adequacy_').rsplit('_',1)[0] if not suffix.startswith('adequacy_') else suffix.removeprefix('adequacy_')
@@ -308,13 +308,13 @@ class DecisionTests(unittest.TestCase):
         judge_pairs(pairs,client)
         self.assertIn('concrete research objective or failure mode',client.calls[0][1]['i0_identity']['instructions'])
         self.assertIn('actual method or benchmark identity',client.calls[0][1]['i1_identity']['instructions'])
-        self.assertIn('state.entities[state.items[1].left]',client.calls[0][1]['i1_identity']['instructions'])
+        self.assertIn('Compare {} with {}',client.calls[0][1]['i1_identity']['instructions'])
         groups=[{'group_id':'a','kind':'ResearchProblem','members':[], 'name':'A','description':'B'},
                 {'group_id':'b','kind':'Benchmark','members':[], 'name':'C','description':'D'}]
         client=FakeClient()
         review_groups(groups,client)
         self.assertIn('concrete research objective or failure mode',client.calls[0][1]['i0_coherence']['instructions'])
-        self.assertIn('state.items[1].members',client.calls[0][1]['i1_coherence']['instructions'])
+        self.assertIn('Compare every member in []',client.calls[0][1]['i1_coherence']['instructions'])
 
 
 class ProbabilityProjectionTests(unittest.TestCase):
@@ -329,6 +329,70 @@ class ProbabilityProjectionTests(unittest.TestCase):
                 if suffix in self.distributions:
                     answer['probabilities'] = self.distributions[suffix]
             return response
+
+    def test_explicit_questions_bind_semantic_objects_with_shared_state(self):
+        a={'mention_id':'private-a','name':'Alpha','description':'first','source':{'version_or_subset':'v1'}}
+        pairs=[{'pair_id':str(n),'kind':'Benchmark','left':a,
+                'right':{'mention_id':str(n),'name':f'Beta {n}','description':f'variant {n}'}}
+               for n in range(20)]
+        client=self.PacketClient();judge_pairs(pairs,client)
+        state,questions=client.calls[0]
+        self.assertEqual((len(state['items']),len(state['entities']),len(questions)),(20,21,20))
+        for n in range(20):
+            prompt=questions[f'i{n}_identity']['instructions']
+            self.assertIn('"version_or_subset": "v1"',prompt)
+            self.assertIn(f'"name": "Beta {n}"',prompt)
+            self.assertIn('using "Benchmark"',prompt)
+            self.assertTrue(prompt.startswith('Compare '))
+            self.assertNotIn('state.entities[',prompt)
+            self.assertNotIn('private-',prompt)
+        legacy=self.PacketClient();judge_pairs(pairs[:1],legacy,context_format='registry-v1')
+        self.assertIn('state.entities[state.items[0].left]',legacy.calls[0][1]['i0_identity']['instructions'])
+
+    def test_explicit_all_categories_and_boundaries(self):
+        source={'paper_id':'private-paper','title':'Title','text':'evidence'}
+        extraction={'contributions':[],'research_problems':[],'methods':[],'benchmarks':[]}
+        group={'group_id':'private-group','kind':'Method','name':'Group Name','description':'Group definition',
+               'members':[{'mention_id':'private-m','name':'Member Name','description':'Member claim'}]}
+        member={'membership_id':'private-binding','group_id':'private-group','kind':'Method',
+                'name':'Group Name','description':'Group definition','member':group['members'][0] | {'source':{'text':'member evidence'}}}
+        calls=[]
+        for action,records in ((classify_scope,[source]),
+                               (review_items,[source | {'field':'methods','key':'private-key','input_hash':'private-hash','item':{'name':'Business item'}}]),
+                               (review_extractions,[source | {'extraction':extraction}]),
+                               (review_completeness,[source | {'extraction':extraction}]),
+                               (review_groups,[group]),(review_group_members,[member])):
+            client=self.PacketClient();action(records,client);calls.extend(client.calls)
+        for state,questions in calls:
+            packet=json.dumps((state,questions),ensure_ascii=False)
+            self.assertNotIn('private-',packet)
+            for question in questions.values():
+                instruction=question['instructions']
+                self.assertNotIn('state.sources[state.',instruction)
+                self.assertNotIn('state.entities[state.',instruction)
+                self.assertNotIn('state.groups[state.',instruction)
+        self.assertIn('state.sources[0].text',calls[0][1]['i0_agent']['instructions'])
+        self.assertIn('state.items[0].item',calls[1][1]['i0_support']['instructions'])
+        self.assertIn('"name": "Member Name"',calls[-1][1]['i0_membership']['instructions'])
+        self.assertIn('state.groups[0].description',calls[-1][1]['i0_membership']['instructions'])
+        self.assertIn('state.sources[0].text',calls[-1][1]['i0_membership']['instructions'])
+        second=member | {'membership_id':'private-binding-2',
+                         'member':{'mention_id':'private-m2','name':'Another member','description':'Another claim','source':{'text':'member evidence'}}}
+        shared=self.PacketClient();review_group_members([member,second],shared)
+        state,questions=shared.calls[0]
+        self.assertEqual(len(state['groups']),1)
+        self.assertEqual(json.dumps({'state':state,'questions':questions}).count('Group definition'),1)
+        self.assertIn('state.groups[0].description',questions['i1_membership']['instructions'])
+        with self.assertRaisesRegex(ValueError,'context_format'):
+            judge_pairs([],self.PacketClient(),context_format='unknown')
+
+    def test_explicit_projection_does_not_rewrite_embedded_semantic_text(self):
+        item={'pair_id':'p','kind':'Method',
+              'left':{'name':'A','description':'literal state.items[0].kind in quoted evidence'},
+              'right':{'name':'B'}}
+        client=self.PacketClient();judge_pairs([item],client)
+        self.assertIn('literal state.items[0].kind in quoted evidence',
+                      client.calls[0][1]['i0_identity']['instructions'])
 
     def test_named_probability_gates_and_legacy(self):
         item={'paper_id':'p','field':'methods','key':'secret-key','input_hash':'secret-hash',

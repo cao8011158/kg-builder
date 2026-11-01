@@ -331,19 +331,26 @@ class DomainGraphTests(unittest.TestCase):
             root=Path(tmp);source=root/'snapshot.json';fixture(source)
             job=SnapshotGraph(source,root/'job',problem_resolution=0.4)
             self.assertEqual(job.status()['decision_metric'],'probability')
+            self.assertEqual(job.status()['context_format'],'explicit-v1')
             self.assertEqual(job.status()['problem_resolution'],0.4)
             job.close()
             with self.assertRaisesRegex(ValueError,'problem_resolution cannot be changed'):
                 SnapshotGraph(source,root/'job',problem_resolution=0.2)
+            with self.assertRaisesRegex(ValueError,'context_format cannot be changed'):
+                SnapshotGraph(source,root/'job',context_format='registry-v1')
             job=SnapshotGraph(source,root/'job')
             self.assertEqual(job.problem_resolution,0.4)
             with job.db:
-                job.db.execute("DELETE FROM meta WHERE key IN ('decision_metric','problem_resolution')")
+                job.db.execute("DELETE FROM meta WHERE key IN ('decision_metric','problem_resolution','context_format')")
             job.close()
             job=SnapshotGraph(source,root/'job')
             self.assertEqual((job.decision_metric,job.problem_resolution),('confidence',0.05))
+            self.assertEqual(job.status()['context_format'],'registry-v1')
             self.assertTrue(job._strict_exclusion({'choice':'not_belongs','confidence':0.9,'probability':0.1}))
+            with job.db:job._set_meta('context_format','invalid')
             job.close()
+            with self.assertRaisesRegex(ValueError,'Invalid saved context_format'):
+                SnapshotGraph(source,root/'job')
             for invalid in (0,-1,float('nan'),float('inf'),True):
                 with self.assertRaises(ValueError):SnapshotGraph(source,root/'invalid',problem_resolution=invalid)
 
@@ -351,8 +358,10 @@ class DomainGraphTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);source=root/'snapshot.json';fixture(source,n=2)
             def judge(items,client,**kwargs):
+                self.assertEqual(kwargs['context_format'],'explicit-v1')
                 return [{'pair_id':p['pair_id'],'decision':'pending' if p['kind']=='Benchmark' else 'same','raw':{}} for p in items]
             def members(items,client,rejection_threshold=0.7,**kwargs):
+                self.assertEqual(kwargs['context_format'],'explicit-v1')
                 results=[]
                 for item in items:
                     if item['kind']=='ResearchArea':

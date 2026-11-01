@@ -96,7 +96,7 @@ def _paper(papers, extraction):
 
 class SnapshotGraph:
     def __init__(self, snapshot_path, job_dir, *, client=None, k=20, batch_size=32,
-                 name_mode='external', model=None, lease_seconds=900, namer=None, name_base_url=None, name_model=None, read_input=True, embedding_cache_dir=None, name_concurrency=3, graph_policy=None, problem_resolution=None):
+                 name_mode='external', model=None, lease_seconds=900, namer=None, name_base_url=None, name_model=None, read_input=True, embedding_cache_dir=None, name_concurrency=3, graph_policy=None, problem_resolution=None, context_format=None):
         self.snapshot_path = Path(snapshot_path).resolve()
         self.job_dir = Path(job_dir).resolve()
         self.job_dir.mkdir(parents=True, exist_ok=True)
@@ -163,6 +163,14 @@ class SnapshotGraph:
         self.decision_metric=self._meta('decision_metric') or ('confidence' if saved else 'probability')
         if self.decision_metric not in ('probability','confidence'):
             raise ValueError('Invalid saved decision_metric')
+        saved_format=self._meta('context_format')
+        self.context_format=saved_format if saved_format is not None else ('registry-v1' if saved else 'explicit-v1')
+        if context_format is not None and (context_format not in ('registry-v1','explicit-v1') or
+                                           saved and context_format!=self.context_format):
+            raise ValueError('Graph job context_format cannot be changed or is invalid')
+        if context_format is not None:self.context_format=context_format
+        if self.context_format not in ('registry-v1','explicit-v1'):
+            raise ValueError('Invalid saved context_format')
         saved_policy = self._meta('graph_policy')
         self.graph_policy = saved_policy or ('legacy' if saved else (graph_policy or 'domain-v1'))
         if graph_policy is not None and graph_policy != self.graph_policy:
@@ -185,6 +193,7 @@ class SnapshotGraph:
                 self._set_meta('name_mode', name_mode)
                 self._set_meta('graph_policy', self.graph_policy)
                 self._set_meta('decision_metric',self.decision_metric)
+                self._set_meta('context_format',self.context_format)
                 self._set_meta('problem_resolution',str(self.problem_resolution))
         elif self._meta('snapshot_stat') != stamp:
             # The full file was read above and both canonical and byte digests matched.
@@ -348,7 +357,7 @@ class SnapshotGraph:
                                      'paper_id':r['paper_id'],'version_id':r['version_id'],'title':r['title'],
                                      'source_url':r['source_url'],'source_hash':r['source_hash'],'source':json.loads(r['source_json'])}
                 inputs = [{'pair_id':r['pair_id'],'kind':r['kind'],'left':mentions[r['left_id']], 'right':mentions[r['right_id']]} for r in rows]
-                try:results = judge_pairs(inputs,self.client,decision_metric=self.decision_metric)
+                try:results = judge_pairs(inputs,self.client,decision_metric=self.decision_metric,context_format=self.context_format)
                 except Exception as exc:
                     self._record_failure(exc)
                     raise
@@ -400,7 +409,7 @@ class SnapshotGraph:
                 groups.append(group)
             for start in range(0,len(groups),self.batch_size):
                 batch=groups[start:start+self.batch_size]
-                try:results=review_groups(batch,self.client,decision_metric=self.decision_metric)
+                try:results=review_groups(batch,self.client,decision_metric=self.decision_metric,context_format=self.context_format)
                 except Exception as exc:
                     self._record_failure(exc)
                     raise
@@ -472,7 +481,7 @@ class SnapshotGraph:
                                              'source':json.loads(m['source_json'])}})
             for start in range(0,len(inputs),self.batch_size):
                 batch=inputs[start:start+self.batch_size]
-                try:results=review_group_members(batch,self.client,decision_metric=self.decision_metric)
+                try:results=review_group_members(batch,self.client,decision_metric=self.decision_metric,context_format=self.context_format)
                 except Exception as exc:
                     self._record_failure(exc);raise
                 mapping={r['membership_id']:r for r in results}
@@ -532,7 +541,7 @@ class SnapshotGraph:
             if inputs and self.client is None:raise ValueError('Jev client required for named area member review')
             for start in range(0,len(inputs),self.batch_size):
                 batch=inputs[start:start+self.batch_size]
-                try:results=review_group_members(batch,self.client,decision_metric=self.decision_metric)
+                try:results=review_group_members(batch,self.client,decision_metric=self.decision_metric,context_format=self.context_format)
                 except Exception as exc:self._record_failure(exc);raise
                 mapping={r['membership_id']:r for r in results}
                 if len(mapping)!=len(results) or set(mapping)!={i['membership_id'] for i in batch}:
@@ -732,7 +741,7 @@ class SnapshotGraph:
                         r=store.db.execute('SELECT name,description,source_json FROM mentions WHERE mention_id=?',(mid,)).fetchone()
                         members.append({'mention_id':mid,'name':r['name'],'description':r['description'],'source':json.loads(r['source_json'])})
                     inputs.append({'group_id':g['group_id'],'kind':g['kind'],'name':g['name'],'description':g['description'],'members':members})
-                try:results=review_groups(inputs,self.client,decision_metric=self.decision_metric)
+                try:results=review_groups(inputs,self.client,decision_metric=self.decision_metric,context_format=self.context_format)
                 except Exception as exc:
                     self._record_failure(exc)
                     raise
@@ -841,7 +850,7 @@ class SnapshotGraph:
         if store_path.exists() and self.graph_policy=='domain-v1' and self._meta('phase')=='complete':
             with sqlite3.connect(store_path) as db:
                 area_count=db.execute('SELECT count(*) FROM research_areas').fetchone()[0]
-        return {'phase':self._meta('phase'),'graph_policy':self.graph_policy,'decision_metric':self.decision_metric,
+        return {'phase':self._meta('phase'),'graph_policy':self.graph_policy,'decision_metric':self.decision_metric,'context_format':self.context_format,
                 'problem_resolution':self.problem_resolution,'snapshot_hash':self._meta('snapshot_hash'),
                 'research_areas':area_count,'retained_memberships':memberships.get(0,0),
                 'excluded_memberships':memberships.get(1,0),'identity_conflicts':json.loads(self._meta('identity_conflicts') or '[]'),

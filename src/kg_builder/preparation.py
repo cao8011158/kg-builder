@@ -35,7 +35,7 @@ def _failure_audits(exc, client):
 class PreparationWorkflow:
     def __init__(self, run_dir, *, target=60, llm_mode='external', jev_model='jev-1.14.0',
                  batch_size=5, per_query=100, since='2025-01-01', until=None,
-                 lease_seconds=1800, repair_limit=2, min_confidence=.7, decision_metric='probability',
+                 lease_seconds=1800, repair_limit=2, min_confidence=.7, decision_metric='probability', context_format='explicit-v1',
                  review_policy='item-v1', item_max_reviews=2, jev_concurrency=4,
                  generation_concurrency=3, scope_workers=2, review_workers=2,
                  client=None, extractor=None, scope_fn=None, review_fn=None,
@@ -44,6 +44,8 @@ class PreparationWorkflow:
             raise ValueError('Invalid review policy or item review budget')
         if decision_metric not in ('probability','confidence'):
             raise ValueError('Invalid decision metric')
+        if context_format not in ('registry-v1','explicit-v1'):
+            raise ValueError('Invalid context format')
         if (not isinstance(min_confidence,(int,float)) or isinstance(min_confidence,bool)
                 or not math.isfinite(min_confidence) or not 0<=min_confidence<=1):
             raise ValueError('Decision threshold must be finite and between 0 and 1')
@@ -56,7 +58,7 @@ class PreparationWorkflow:
         self.config=dict(target=target,llm_mode=llm_mode,jev_model=jev_model,batch_size=batch_size,
                          per_query=per_query,since=since,until=until or datetime.now(timezone.utc).date().isoformat(),
                          lease_seconds=lease_seconds,repair_limit=repair_limit,min_confidence=min_confidence,
-                         decision_metric=decision_metric,
+                         decision_metric=decision_metric,context_format=context_format,
                          review_policy=review_policy,item_max_reviews=item_max_reviews,
                          jev_concurrency=jev_concurrency,generation_concurrency=generation_concurrency,
                          scope_workers=scope_workers,review_workers=review_workers)
@@ -74,8 +76,12 @@ class PreparationWorkflow:
     @property
     def decision_metric(self):return self.config.get('decision_metric','confidence')
 
+    @property
+    def context_format(self):return self.config.get('context_format','registry-v1')
+
     def _native_decision(self, fn, *args):
-        return fn(*args,min_confidence=self.config['min_confidence'],decision_metric=self.decision_metric)
+        return fn(*args,min_confidence=self.config['min_confidence'],decision_metric=self.decision_metric,
+                  context_format=self.context_format)
 
     def _item_passes(self, outcome):
         if not outcome.get('passed'):return False
@@ -142,6 +148,8 @@ class PreparationWorkflow:
         row=db.execute('SELECT config_json FROM run WHERE id=1').fetchone()
         if row:
             old=json.loads(row[0])
+            if old.get('context_format','registry-v1') not in ('registry-v1','explicit-v1'):
+                raise ValueError('Invalid saved context format')
             if old!=self.config:
                 # A caller can reopen without reproducing defaults; run configuration remains authoritative.
                 self.config=old
@@ -611,7 +619,7 @@ class PreparationWorkflow:
         try:
             run=dict(db.execute('SELECT * FROM run WHERE id=1').fetchone())
             return dict(run_id=run['run_id'],collection_state=run['collection_state'],config=json.loads(run['config_json']),
-               decision_metric=self.decision_metric,
+               decision_metric=self.decision_metric,context_format=self.context_format,
                jev_concurrency=json.loads(run['jev_stats_json']) if run['jev_stats_json'] else getattr(self.client,'concurrency_stats',None),
                papers={r[0]:r[1] for r in db.execute('SELECT scope_state,count(*) FROM papers GROUP BY scope_state')},
                review={r[0]:r[1] for r in db.execute('SELECT review_state,count(*) FROM papers GROUP BY review_state')},

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import time
 import uuid
 import threading
@@ -301,6 +302,44 @@ def _metric(metric):
     return metric
 
 
+def _context_format(value):
+    if value not in ('registry-v1', 'explicit-v1'):
+        raise ValueError('context_format must be registry-v1 or explicit-v1')
+    return value
+
+
+def _explicit_instruction(instruction, state, index, category):
+    """Resolve local registry references before sending a question to Jev."""
+    record = state['items'][index]
+    path = f'state.items[{index}]'
+    replacements = {}
+    if 'source' in record:
+        source_path = f"state.sources[{record['source']}]"
+        replacements.update({f'{path}.text': source_path + '.text',
+                             f'{path}.title': source_path + '.title'})
+    if category == 'pair':
+        # The object facts are intentionally embedded in each pair question. The
+        # shared semantic registry remains available as evidence for the request.
+        replacements.update({f'{path}.left': json.dumps(state['entities'][record['left']], ensure_ascii=False),
+                             f'{path}.right': json.dumps(state['entities'][record['right']], ensure_ascii=False),
+                             f'{path}.kind': json.dumps(record['kind'], ensure_ascii=False)})
+    elif category == 'group':
+        replacements[f'{path}.members'] = json.dumps([state['entities'][n] for n in record['members']], ensure_ascii=False)
+    elif category == 'member':
+        replacements[f'{path}.member'] = json.dumps(state['entities'][record['member']], ensure_ascii=False)
+    if category in ('group', 'member'):
+        for field in ('kind', 'name', 'description'):
+            replacements[f'{path}.{field}'] = f"state.groups[{record['group']}].{field}"
+    # Replace only original instruction tokens; semantic descriptions are data and
+    # must not be rewritten if they happen to contain a path-shaped string.
+    if replacements:
+        pattern = '|'.join(re.escape(old) for old in sorted(replacements, key=len, reverse=True))
+        instruction = re.sub(pattern, lambda match: replacements[match.group()], instruction)
+    if category == 'member' and 'source' in record:
+        instruction += f" Use state.sources[{record['source']}].text as member source evidence."
+    return instruction
+
+
 def _score(answer, option, metric):
     if metric == 'confidence':
         return answer['confidence']
@@ -327,7 +366,7 @@ def _question_batches(items, make, max_questions=24):
         yield batch
 
 
-def _run(items, client, make, consume, *, category=None):
+def _run(items, client, make, consume, *, category=None, context_format='explicit-v1'):
     prepared = []
     jobs = []
     pending = list(_batches(items, make)) if category is None else list(_question_batches(items, make))
@@ -340,12 +379,13 @@ def _run(items, client, make, consume, *, category=None):
             for suffix, q in make(item).items():
                 targeted = dict(q)
                 identity = item.get('paper_id', item.get('pair_id', item.get('membership_id', item.get('group_id'))))
-                prefix = (f'For state.items[{index}], ' if category else
+                prefix = ('' if category == 'pair' and context_format == 'explicit-v1' else
+                          f'For state.items[{index}], ' if category else
                           f'For state.items[{index}] (ID {json.dumps(identity, ensure_ascii=False)}), ')
                 instruction = q['instructions']
                 if category in ('pair', 'group', 'member'):
                     instruction += ' Different consuming tasks, papers, or roles alone do not establish distinct identity. Missing version alone does not contradict identity.'
-                if category:
+                if category and context_format == 'registry-v1':
                     instruction = (instruction.replace('state.items[INDEX].title', 'state.sources[state.items[INDEX].source].title')
                         .replace('state.items[INDEX].text', 'state.sources[state.items[INDEX].source].text')
                         .replace('state.items[INDEX].left', 'state.entities[state.items[INDEX].left]')
@@ -356,7 +396,10 @@ def _run(items, client, make, consume, *, category=None):
                         .replace('state.items[INDEX].name', 'state.groups[state.items[INDEX].group].name')
                         .replace('state.items[INDEX].description', 'state.groups[state.items[INDEX].group].description')
                         .replace('state.items[INDEX].kind', 'state.groups[state.items[INDEX].group].kind' if category in ('group', 'member') else 'state.items[INDEX].kind'))
-                targeted['instructions'] = prefix + instruction.replace('state.items[INDEX]', f'state.items[{index}]')
+                instruction = instruction.replace('state.items[INDEX]', f'state.items[{index}]')
+                if category and context_format == 'explicit-v1':
+                    instruction = _explicit_instruction(instruction, state, index, category)
+                targeted['instructions'] = prefix + instruction
                 questions[f'i{index}_{suffix}'] = targeted
         responses = []
         answer_set = {}
@@ -460,8 +503,8 @@ _SCOPE = {
 _TOPIC_NAMES = {'memory': 'agent_memory', 'context': 'context_management', 'skills': 'skill_evolution'}
 
 
-def classify_scope(papers, client, min_confidence=0.7, *, decision_metric='probability'):
-    _threshold(min_confidence); _metric(decision_metric)
+def classify_scope(papers, client, min_confidence=0.7, *, decision_metric='probability', context_format='explicit-v1'):
+    _threshold(min_confidence); _metric(decision_metric); _context_format(context_format)
     def make(item):
         return {key: _choice(f'Use state.items[INDEX].title and state.items[INDEX].text as source evidence. {instruction} Generic tool use, RL posttraining, model KV-cache acceleration, and generic RSI alone do not qualify. Use only supplied source content.', _OPTIONS)
                 for key, instruction in _SCOPE.items()}
@@ -482,11 +525,11 @@ def classify_scope(papers, client, min_confidence=0.7, *, decision_metric='proba
                 'topics': [_TOPIC_NAMES[key] for key in topics],
                 'reason': 'Jev scope choices and ' + decision_metric + ' policy: ' + decision,
                 'decision_metric': decision_metric, 'raw': raw}
-    return _run(list(papers), client, make, consume, category='scope' if decision_metric == 'probability' else None)
+    return _run(list(papers), client, make, consume, category='scope' if decision_metric == 'probability' else None, context_format=context_format)
 
 
-def review_extractions(items, client, min_confidence=0.7, *, decision_metric='probability'):
-    _threshold(min_confidence); _metric(decision_metric)
+def review_extractions(items, client, min_confidence=0.7, *, decision_metric='probability', context_format='explicit-v1'):
+    _threshold(min_confidence); _metric(decision_metric); _context_format(context_format)
     def make(item):
         questions = {}
         for field in ('contributions', 'research_problems', 'methods', 'benchmarks'):
@@ -521,12 +564,12 @@ def review_extractions(items, client, min_confidence=0.7, *, decision_metric='pr
                 issues.append(key + ': ' + (answer['choice'] if _score(answer, expected, decision_metric) >= min_confidence else 'low ' + decision_metric))
         return {'paper_id': item['paper_id'], 'passed': not issues, 'issues': issues, 'raw': raw,
                 'item_results': item_results, 'completeness': completeness, 'decision_metric': decision_metric}
-    return _run(list(items), client, make, consume, category='extraction' if decision_metric == 'probability' else None)
+    return _run(list(items), client, make, consume, category='extraction' if decision_metric == 'probability' else None, context_format=context_format)
 
 
-def review_items(items, client, min_confidence=0.7, *, decision_metric='probability'):
+def review_items(items, client, min_confidence=0.7, *, decision_metric='probability', context_format='explicit-v1'):
     """Review independently keyed extraction items while preserving caller input hashes."""
-    _threshold(min_confidence); _metric(decision_metric)
+    _threshold(min_confidence); _metric(decision_metric); _context_format(context_format)
     fields = ('contributions', 'research_problems', 'methods', 'benchmarks')
     items = list(items)
     for item in items:
@@ -548,12 +591,12 @@ def review_items(items, client, min_confidence=0.7, *, decision_metric='probabil
                 'confidence': answer['confidence'],
                 **({'probability': probability} if decision_metric == 'probability' else {}),
                 'decision_metric': decision_metric, 'raw': raw}
-    return _run(items, client, make, consume, category='item' if decision_metric == 'probability' else None)
+    return _run(items, client, make, consume, category='item' if decision_metric == 'probability' else None, context_format=context_format)
 
 
-def review_completeness(items, client, min_confidence=0.7, *, decision_metric='probability'):
+def review_completeness(items, client, min_confidence=0.7, *, decision_metric='probability', context_format='explicit-v1'):
     """Return four paper adequacy diagnostics without applying an item gate."""
-    _threshold(min_confidence); _metric(decision_metric)
+    _threshold(min_confidence); _metric(decision_metric); _context_format(context_format)
     fields = ('contributions', 'research_problems', 'methods', 'benchmarks')
     def make(item):
         return {f'adequacy_{field}': _choice(
@@ -569,11 +612,11 @@ def review_completeness(items, client, min_confidence=0.7, *, decision_metric='p
                        if decision_metric == 'probability' else {}),
                     'decision_metric': decision_metric}
                     for field in fields}, 'decision_metric': decision_metric, 'raw': raw}
-    return _run(list(items), client, make, consume, category='completeness' if decision_metric == 'probability' else None)
+    return _run(list(items), client, make, consume, category='completeness' if decision_metric == 'probability' else None, context_format=context_format)
 
 
-def judge_pairs(pairs, client, min_confidence=0.7, *, decision_metric='probability'):
-    _threshold(min_confidence); _metric(decision_metric)
+def judge_pairs(pairs, client, min_confidence=0.7, *, decision_metric='probability', context_format='explicit-v1'):
+    _threshold(min_confidence); _metric(decision_metric); _context_format(context_format)
     def make(item):
         kind = str(item.get('kind', '')).lower().replace('_', '')
         identity = ('the same concrete research objective or failure mode' if kind == 'researchproblem'
@@ -587,11 +630,11 @@ def judge_pairs(pairs, client, min_confidence=0.7, *, decision_metric='probabili
                 **({'probability': _score(answer, answer['choice'], decision_metric)}
                    if decision_metric == 'probability' else {}),
                 'confidence': answer['confidence'], 'decision_metric': decision_metric, 'raw': raw}
-    return _run(list(pairs), client, make, consume, category='pair' if decision_metric == 'probability' else None)
+    return _run(list(pairs), client, make, consume, category='pair' if decision_metric == 'probability' else None, context_format=context_format)
 
 
-def review_groups(groups, client, min_confidence=0.7, *, decision_metric='probability'):
-    _threshold(min_confidence); _metric(decision_metric)
+def review_groups(groups, client, min_confidence=0.7, *, decision_metric='probability', context_format='explicit-v1'):
+    _threshold(min_confidence); _metric(decision_metric); _context_format(context_format)
     def make(item):
         kind = str(item.get('kind', '')).lower().replace('_', '')
         identity = ('the same concrete research objective or failure mode' if kind == 'researchproblem'
@@ -606,12 +649,12 @@ def review_groups(groups, client, min_confidence=0.7, *, decision_metric='probab
                 **({'probability': _score(answer, 'coherent', decision_metric)}
                    if decision_metric == 'probability' else {}),
                 'confidence': answer['confidence'], 'decision_metric': decision_metric, 'raw': raw}
-    return _run(list(groups), client, make, consume, category='group' if decision_metric == 'probability' else None)
+    return _run(list(groups), client, make, consume, category='group' if decision_metric == 'probability' else None, context_format=context_format)
 
 
-def review_group_members(items, client, rejection_threshold=0.7, *, decision_metric='probability'):
+def review_group_members(items, client, rejection_threshold=0.7, *, decision_metric='probability', context_format='explicit-v1'):
     """Audit each candidate member; only a confident negative excludes it."""
-    _threshold(rejection_threshold); _metric(decision_metric)
+    _threshold(rejection_threshold); _metric(decision_metric); _context_format(context_format)
     items=list(items)
     ids=[]
     for item in items:
@@ -649,4 +692,4 @@ def review_group_members(items, client, rejection_threshold=0.7, *, decision_met
                 probability>rejection_threshold,'choice':choice,'confidence':confidence,
                 **({'probability':probability} if decision_metric == 'probability' else {}),
                 'decision_metric':decision_metric,'raw':raw}
-    return _run(items,client,make,consume,category='member' if decision_metric == 'probability' else None)
+    return _run(items,client,make,consume,category='member' if decision_metric == 'probability' else None, context_format=context_format)
