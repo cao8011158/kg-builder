@@ -1,5 +1,8 @@
 # Deterministic corpus batch import
 
+This historical SQLite corpus/semantic-sidecar import does not populate a new
+PostgreSQL preparation run. New runs use the preparation CLI with `--run-id`.
+
 `scripts/apply_corpus_batch.py` imports human supplied relevance decisions and v0.3 retrieval extractions. It does not call a model, decide relevance, fetch papers, or infer missing content. Keep the source manifest and reviewed JSON as auditable inputs; back up the master before applying a batch.
 
 ```bash

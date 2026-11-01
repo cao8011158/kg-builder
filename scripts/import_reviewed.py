@@ -16,17 +16,7 @@ def load_batch(path):
 
 
 def main(argv=None):
-    p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--db',default='data/research_knowledge.sqlite3')
-    p.add_argument('--input',required=True)
-    args=p.parse_args(argv)
-    records=load_batch(args.input)  # No database is opened for malformed JSON or schema.
-    con=connect(args.db)
-    try:
-        ingest_extractions(con,records)
-    finally:
-        con.close()
-    print('Imported',len(records),'reviewed or draft extraction records (statuses preserved)')
+    raise SystemExit('Historical SQLite import retired. Submit pinned v0.3 extraction tasks via scripts/prepare_pipeline.py --run-id RUN_ID --run-dir ARTIFACT_DIR submit --input FILE with KG_DATABASE_URL.')
 
 
 if __name__=='__main__':

@@ -2,9 +2,9 @@
 from __future__ import annotations
 import asyncio
 from datetime import date
+import hashlib
 import json
 from pathlib import Path
-import sqlite3
 import threading
 import time
 from urllib.parse import urlencode
@@ -12,7 +12,8 @@ from xml.etree import ElementTree as ET
 
 from .collectors import fetch_bytes, normalize_openalex, normalize_arxiv_entry
 from .preparation import CANON, PreparationWorkflow
-from .storage import connect as source_connect, upsert_paper
+from psycopg import sql
+import secrets
 
 PLAN = Path(__file__).resolve().parents[2] / 'config/full_preparation_plan.json'
 OA_SELECT = 'id,doi,title,publication_year,publication_date,authorships,abstract_inverted_index,ids,primary_location,updated_date'
@@ -57,169 +58,190 @@ def parse_page(source, raw, position, received=0):
 
 class FullPreparationWorkflow(PreparationWorkflow):
     def __init__(self, run_dir, *, plan=None, fetcher=None, **kwargs):
-        if plan is None:
-            saved_path=Path(run_dir)/'workflow.sqlite3'
-            if saved_path.exists():
-                with sqlite3.connect(saved_path) as existing:
-                    table=existing.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='full_plan'").fetchone()
-                    saved=existing.execute('SELECT payload FROM full_plan WHERE id=1').fetchone() if table else None
-                plan=json.loads(saved[0]) if saved else None
-        self.plan=json.loads(PLAN.read_text()) if plan is None else plan
-        self.fetcher=fetcher or fetch_page
-        self._admission_lock=threading.Lock()
-        self._stop_collection=threading.Event()
-        if self.plan['schema']!='full-preparation-plan/1' or self.plan['page_size']!=100:
+        proposed=json.loads(PLAN.read_text()) if plan is None else plan
+        if proposed['schema']!='full-preparation-plan/1' or proposed['page_size']!=100:
             raise ValueError('Invalid full collection plan')
-        # Explicit mode flag is persisted in the regular run configuration.
-        kwargs.setdefault('target',0)
-        kwargs.setdefault('since',self.plan['since'])
-        kwargs.setdefault('until',self.plan['until'])
+        self.fetcher=fetcher or fetch_page
+        self._stop_collection=threading.Event()
+        for field,value in (('target',0),('llm_mode','external'),('since',proposed['since']),
+                            ('until',proposed['until']),('jev_concurrency',8),
+                            ('generation_concurrency',4),('scope_workers',4),('review_workers',4)):
+            kwargs.setdefault(field,value)
         super().__init__(run_dir,**kwargs)
         if self.config['target']!=0 or self.config['llm_mode']!='external':
-            raise ValueError('Full collection requires its own external-mode run directory')
+            raise ValueError('Full collection requires a dedicated external-mode logical run')
         db=self._db()
         try:
-            with db:
-                db.executescript('''CREATE TABLE IF NOT EXISTS full_plan (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL);
-                    CREATE TABLE IF NOT EXISTS full_streams (stream_id TEXT PRIMARY KEY, source TEXT NOT NULL,
-                        windows_json TEXT NOT NULL, window_index INTEGER NOT NULL DEFAULT 0,
-                        position TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'open', received INTEGER NOT NULL DEFAULT 0,
-                        window_received INTEGER NOT NULL DEFAULT 0,
-                        admitted INTEGER NOT NULL DEFAULT 0, next_request_at REAL NOT NULL DEFAULT 0, error TEXT);
-                    CREATE TABLE IF NOT EXISTS full_pages (stream_id TEXT NOT NULL, window_index INTEGER NOT NULL,
-                        position TEXT NOT NULL, raw BLOB NOT NULL, state TEXT NOT NULL DEFAULT 'fetched',
-                        count INTEGER, total INTEGER, PRIMARY KEY(stream_id,window_index,position));
-                    CREATE INDEX IF NOT EXISTS idx_full_pages_state ON full_pages(stream_id,state);
-                    CREATE TABLE IF NOT EXISTS full_deferred (source TEXT NOT NULL, source_id TEXT NOT NULL,
-                        record_json TEXT NOT NULL, PRIMARY KEY(source,source_id));''')
-                if 'window_received' not in {r[1] for r in db.execute('PRAGMA table_info(full_streams)')}:
-                    db.execute('ALTER TABLE full_streams ADD COLUMN window_received INTEGER NOT NULL DEFAULT 0')
-                    db.execute('''UPDATE full_streams SET window_received=COALESCE((SELECT sum(count) FROM full_pages
-                        WHERE full_pages.stream_id=full_streams.stream_id AND full_pages.window_index=full_streams.window_index
-                        AND full_pages.state='applied'),0)''')
-                saved=db.execute('SELECT payload FROM full_plan WHERE id=1').fetchone()
-                if saved and saved[0]!=CANON(self.plan):raise ValueError('Full collection plan differs from saved plan')
+            with db.transaction():
+                lock_key=int.from_bytes(hashlib.sha256(('full-plan:'+self.store.workflow_schema).encode()).digest()[:8],
+                                        'big',signed=True)
+                db.execute('SELECT pg_advisory_xact_lock(%s)',(lock_key,))
+                saved=db.execute('SELECT payload FROM full_plan WHERE id=1 FOR UPDATE').fetchone()
+                self.plan=json.loads(saved['payload']) if saved and plan is None else proposed
+                if saved and saved['payload']!=CANON(self.plan):
+                    raise ValueError('Full collection plan differs from saved plan')
                 if not saved:
                     if db.execute('SELECT 1 FROM papers LIMIT 1').fetchone() or db.execute('SELECT 1 FROM query_progress LIMIT 1').fetchone():
-                        raise ValueError('Full collection requires an unused run directory')
-                    db.execute('INSERT INTO full_plan VALUES(1,?)',(CANON(self.plan),))
+                        raise ValueError('Full collection requires an unused logical run')
                     windows=self.plan['openalex_windows']
                     if len(windows)<4 or windows[0]['since']!=self.plan['since'] or windows[-1]['until']!=self.plan['until']:
                         raise ValueError('Incomplete OpenAlex windows')
                     for i in range(1,len(windows)):
                         if date.fromisoformat(windows[i-1]['until']).toordinal()+1!=date.fromisoformat(windows[i]['since']).toordinal():
                             raise ValueError('OpenAlex windows overlap or leave gaps')
+                    db.execute('INSERT INTO full_plan VALUES(1,%s)',(CANON(self.plan),))
                     for n in range(4):
-                        assigned=windows[n::4]
-                        db.execute('INSERT INTO full_streams(stream_id,source,windows_json,position) VALUES(?,?,?,?)',
-                            (f'openalex-{n}','openalex',CANON(assigned),'*'))
-                    db.execute('INSERT INTO full_streams(stream_id,source,windows_json,position) VALUES(?,?,?,?)',
-                        ('arxiv-0','arxiv',CANON([{'since':self.plan['since'],'until':self.plan['until']}]),'0'))
-        finally:db.close()
+                        db.execute('INSERT INTO full_streams(stream_id,source,windows_json,position) VALUES(%s,%s,%s,%s)',
+                                   (f'openalex-{n}','openalex',CANON(windows[n::4]),'*'))
+                    db.execute('INSERT INTO full_streams(stream_id,source,windows_json,position) VALUES(%s,%s,%s,%s)',
+                               ('arxiv-0','arxiv',CANON([{'since':self.plan['since'],'until':self.plan['until']}]),'0'))
+        finally:self._release(db)
 
-    def _admit_full(self, record, source):
+    def _admit_full(self, record, source, db=None):
         published=record.get('published_at') or ''
         sid=record['source_id']
-        master=source_connect(self.master)
+        query=self.plan['openalex_query'] if source=='openalex' else self.plan['arxiv_query']
+        row={**record,'topics':['all_topics'],'topic_basis':'discovery_query_candidate'}
+        row.pop('source_id')
+        owns_connection=db is None
+        if owns_connection:db=self._db()
         try:
-            pid,_=upsert_paper(master,{**record,'topics':[]},source,sid,self.plan['openalex_query'] if source=='openalex' else self.plan['arxiv_query'])
-            first=master.execute('SELECT first_published FROM papers WHERE paper_id=?',(pid,)).fetchone()[0]
-        finally:master.close()
-        if first and first[:10]<self.plan['since']:
-            # A later-version date may not requalify a pre-window paper.
-            db=self._db()
-            with db:
-                db.execute("UPDATE papers SET scope_state='pending',review_state='pending',reason='before_window' WHERE paper_id=?",(pid,))
-                db.execute("UPDATE tasks SET state='failed',reason='before_window',lease_token=NULL WHERE paper_id=? AND state IN ('queued','leased')",(pid,))
-                db.execute("UPDATE item_reviews SET state='revoked',approved_json=NULL WHERE paper_id=?",(pid,))
-            db.close()
+            if owns_connection:
+                with db.transaction():return self._admit_full(record,source,db)
+            pid,vid=self.source.upsert_paper(db,row,source,sid,query)
+            first=db.execute(sql.SQL('SELECT first_published FROM {} WHERE paper_id=%s').format(
+                self.store.source_table('papers')),(pid,)).fetchone()['first_published']
+            if first and first[:10]<self.plan['since']:
+                db.execute("UPDATE papers SET scope_state='pending',review_state='pending',reason='before_window',scope_token=NULL,review_token=NULL WHERE paper_id=%s",(pid,))
+                db.execute("UPDATE tasks SET state='failed',reason='before_window',lease_token=NULL WHERE paper_id=%s AND state IN ('queued','leased')",(pid,))
+                db.execute("UPDATE item_reviews SET state='revoked',approved_json=NULL WHERE paper_id=%s",(pid,))
+                self._assert_mutable(db)
+                return 0
+            if published and published[:10]>self.plan['until']:
+                self._assert_mutable(db)
+                return 0
+            if record.get('abstract'):
+                existed=bool(db.execute('SELECT 1 FROM papers WHERE paper_id=%s',(pid,)).fetchone())
+                self._freeze_source(db,row,source,sid,pid,vid)
+                return int(not existed)
+            db.execute('INSERT INTO full_deferred(source,source_id,record_json) VALUES(%s,%s,%s) ON CONFLICT(source,source_id) DO NOTHING',
+                       (source,sid,CANON(record)))
+            self._assert_mutable(db)
             return 0
-        if published and published[:10]>self.plan['until']:
-            return 0
-        if record.get('abstract'):
-            db=self._db()
-            existed=bool(db.execute('SELECT 1 FROM papers WHERE paper_id=?',(pid,)).fetchone())
-            db.close()
-            self.add_source(record,source,self.plan['openalex_query'] if source=='openalex' else self.plan['arxiv_query'],'all_topics')
-            return int(not existed)
-        db=self._db()
-        with db:db.execute('INSERT OR IGNORE INTO full_deferred VALUES(?,?,?)',(source,sid,CANON(record)))
-        db.close()
-        return 0
+        finally:
+            if owns_connection:self._release(db)
 
     def _consume(self, stream_id):
-        db=self._db()
+        db=self._db();token=secrets.token_urlsafe(24)
         try:
-            stream=db.execute('SELECT * FROM full_streams WHERE stream_id=?',(stream_id,)).fetchone()
-            if stream['state']=='done':return False
-            windows=json.loads(stream['windows_json'])
-            if stream['window_index']>=len(windows):return False
-            wi=stream['window_index']; position=stream['position']; source=stream['source']
-            page=db.execute('SELECT raw FROM full_pages WHERE stream_id=? AND window_index=? AND position=?',(stream_id,wi,position)).fetchone()
+            with db.transaction():
+                stream=db.execute('SELECT * FROM full_streams WHERE stream_id=%s FOR UPDATE SKIP LOCKED',(stream_id,)).fetchone()
+                if not stream or stream['state']=='done' or (stream['state']=='processing' and stream['lease_until'] and stream['lease_until']>time.time()):
+                    return False
+                if stream['state']=='failed':return False
+                windows=json.loads(stream['windows_json'])
+                if stream['window_index']>=len(windows):return False
+                wi=stream['window_index'];position=stream['position'];source=stream['source']
+                db.execute("UPDATE full_streams SET state='processing',lease_token=%s,lease_until=%s WHERE stream_id=%s",
+                           (token,time.time()+self.config['lease_seconds'],stream_id))
+                page=db.execute('SELECT raw,applied_rows,admitted FROM full_pages WHERE stream_id=%s AND window_index=%s AND position=%s',
+                                (stream_id,wi,position)).fetchone()
+                if page is None and source=='arxiv':
+                    request_at=max(time.time(),stream['next_request_at'])
+                    # Reserve a small scheduling margin so measured HTTP start
+                    # times remain at least three seconds apart.
+                    db.execute('UPDATE full_streams SET next_request_at=%s WHERE stream_id=%s',(request_at+3.05,stream_id))
+                else:request_at=0
             if page is None:
-                if source=='arxiv':
-                    delay=max(0,stream['next_request_at']-time.time())
-                    if delay:time.sleep(delay)
-                    # Reserve pacing before HTTP, including failures and process restarts.
-                    with db:db.execute('UPDATE full_streams SET next_request_at=? WHERE stream_id=?',(time.time()+3,stream_id))
+                if request_at:time.sleep(max(0,request_at-time.time()))
                 raw=self.fetcher(source,self.plan,windows[wi],position)
-                with db:db.execute('INSERT OR IGNORE INTO full_pages(stream_id,window_index,position,raw) VALUES(?,?,?,?)',
-                                   (stream_id,wi,position,raw))
-            else:raw=page['raw']
+                with db.transaction():
+                    current=db.execute('SELECT lease_token,lease_until FROM full_streams WHERE stream_id=%s FOR UPDATE',(stream_id,)).fetchone()
+                    if current['lease_token']!=token or current['lease_until']<time.time():raise ValueError('Stale stream lease')
+                    db.execute('INSERT INTO full_pages(stream_id,window_index,position,raw) VALUES(%s,%s,%s,%s) ON CONFLICT(stream_id,window_index,position) DO NOTHING',
+                               (stream_id,wi,position,raw))
+                    page=db.execute('SELECT raw,applied_rows,admitted FROM full_pages WHERE stream_id=%s AND window_index=%s AND position=%s',
+                                    (stream_id,wi,position)).fetchone()
+            raw=bytes(page['raw'])
             rows,next_position,total=parse_page(source,raw,position,stream['window_received'])
             if len(rows)>self.plan['page_size']:raise ValueError('Oversized source page')
-            admitted=0
-            for row in rows:
-                with self._admission_lock:
-                    admitted+=self._admit_full(row,source)
-            if next_position is None:
-                wi+=1
-                next_position='*' if source=='openalex' else '0'
-            state='done' if wi==len(windows) else 'open'
-            with db:
-                db.execute("UPDATE full_pages SET state='applied',count=?,total=? WHERE stream_id=? AND window_index=? AND position=?",
-                           (len(rows),total,stream_id,stream['window_index'],position))
-                db.execute('''UPDATE full_streams SET window_index=?,position=?,state=?,received=received+?,
-                    window_received=?,admitted=admitted+?,error=NULL WHERE stream_id=?''',
-                           (wi,str(next_position),state,len(rows),
-                            stream['window_received']+len(rows) if wi==stream['window_index'] else 0,
-                            admitted,stream_id))
+            for index in range(page['applied_rows'],len(rows)):
+                with db.transaction():
+                    current=db.execute('SELECT lease_token,lease_until FROM full_streams WHERE stream_id=%s',(stream_id,)).fetchone()
+                    if current['lease_token']!=token or current['lease_until']<time.time():raise ValueError('Stale stream lease')
+                    admitted=self._admit_full(rows[index],source,db)
+                    renewal=time.time()
+                    updated=db.execute("UPDATE full_streams SET lease_until=%s WHERE stream_id=%s AND lease_token=%s AND state='processing' AND lease_until>=%s",
+                                       (renewal+self.config['lease_seconds'],stream_id,token,renewal))
+                    if updated.rowcount!=1:raise ValueError('Stale stream lease')
+                    db.execute('UPDATE full_pages SET applied_rows=%s,admitted=admitted+%s WHERE stream_id=%s AND window_index=%s AND position=%s AND applied_rows=%s',
+                               (index+1,admitted,stream_id,wi,position,index))
+            new_wi=wi+1 if next_position is None else wi
+            new_position=('*' if source=='openalex' else '0') if next_position is None else str(next_position)
+            state='done' if new_wi==len(windows) else 'open'
+            with db.transaction():
+                current=db.execute('SELECT lease_token,lease_until,window_received FROM full_streams WHERE stream_id=%s FOR UPDATE',(stream_id,)).fetchone()
+                if current['lease_token']!=token or current['lease_until']<time.time():raise ValueError('Stale stream lease')
+                page=db.execute('SELECT state,applied_rows,admitted FROM full_pages WHERE stream_id=%s AND window_index=%s AND position=%s FOR UPDATE',
+                                (stream_id,wi,position)).fetchone()
+                if page['state']=='applied':return state!='done'
+                if page['applied_rows']!=len(rows):raise ValueError('Incomplete page admission')
+                db.execute("UPDATE full_pages SET state='applied',count=%s,total=%s WHERE stream_id=%s AND window_index=%s AND position=%s",
+                           (len(rows),total,stream_id,wi,position))
+                db.execute('''UPDATE full_streams SET window_index=%s,position=%s,state=%s,
+                    received=received+%s,window_received=%s,admitted=admitted+%s,
+                    lease_token=NULL,lease_until=NULL,error=NULL WHERE stream_id=%s AND lease_token=%s''',
+                    (new_wi,new_position,state,len(rows),current['window_received']+len(rows) if new_wi==wi else 0,
+                     page['admitted'],stream_id,token))
             return state!='done'
         except Exception as exc:
-            with db:db.execute('UPDATE full_streams SET state=?,error=? WHERE stream_id=?',
-                               ('failed',type(exc).__name__+(' HTTP '+str(exc.code) if isinstance(getattr(exc,'code',None),int) else ''),stream_id))
+            with db.transaction():
+                db.execute('''UPDATE full_streams SET state='failed',lease_token=NULL,lease_until=NULL,error=%s
+                    WHERE stream_id=%s AND lease_token=%s''',
+                    (type(exc).__name__+(' HTTP '+str(exc.code) if isinstance(getattr(exc,'code',None),int) else ''),stream_id,token))
             raise
-        finally:db.close()
+        finally:self._release(db)
 
     def _stream(self, stream_id):
-        while not self._stop_collection.is_set() and self._consume(stream_id):pass
+        while not self._stop_collection.is_set():
+            if self._consume(stream_id):continue
+            db=self._db()
+            try:state=db.execute('SELECT state FROM full_streams WHERE stream_id=%s',(stream_id,)).fetchone()['state']
+            finally:self._release(db)
+            if state=='done':return
+            if state=='failed':raise ValueError('Full stream failed')
+            time.sleep(.5)
 
     def _finish_empty(self):
         db=self._db()
         try:
-            for source,sid,record_json in db.execute('SELECT source,source_id,record_json FROM full_deferred'):
-                master=source_connect(self.master)
-                try:
-                    r=master.execute('SELECT paper_id FROM source_records WHERE source_name=? AND source_id=?',(source,sid)).fetchone()
-                    pid=r[0]
-                    first=master.execute('SELECT first_published FROM papers WHERE paper_id=?',(pid,)).fetchone()[0]
-                finally:master.close()
-                if first and first[:10]<self.plan['since']:continue
-                if not db.execute('SELECT 1 FROM papers WHERE paper_id=?',(pid,)).fetchone():
-                    self.add_source(json.loads(record_json),source,'all_topics','all_topics')
-            with db:db.execute('DELETE FROM full_deferred')
-        finally:db.close()
+            deferred=db.execute('SELECT source,source_id,record_json FROM full_deferred ORDER BY source,source_id').fetchall()
+            for row in deferred:
+                source,sid=row['source'],row['source_id']
+                with db.transaction():
+                    source_record=db.execute(sql.SQL('SELECT paper_id FROM {} WHERE source_name=%s AND source_id=%s').format(
+                        self.store.source_table('source_records')),(source,sid)).fetchone()
+                    pid=source_record['paper_id']
+                    first=db.execute(sql.SQL('SELECT first_published FROM {} WHERE paper_id=%s').format(
+                        self.store.source_table('papers')),(pid,)).fetchone()['first_published']
+                    if not first or first[:10]>=self.plan['since']:
+                        if not db.execute('SELECT 1 FROM papers WHERE paper_id=%s',(pid,)).fetchone():
+                            record=json.loads(row['record_json'])
+                            normalized={**record,'topics':['all_topics'],'topic_basis':'discovery_query_candidate'}
+                            normalized.pop('source_id')
+                            _,vid=self.source.upsert_paper(db,normalized,source,sid,'all_topics')
+                            self._freeze_source(db,normalized,source,sid,pid,vid)
+                    db.execute('DELETE FROM full_deferred WHERE source=%s AND source_id=%s',(source,sid))
+        finally:self._release(db)
 
     async def collect(self):
         # One arXiv request lane and four independent OpenAlex cursor lanes.
-        # Admission is serialized to respect SQLite's single-writer boundary.
         try:
             self._stop_collection.clear()
             for stream_id in ('openalex-0','openalex-1','openalex-2','openalex-3','arxiv-0'):
                 db=self._db()
-                with db:db.execute("UPDATE full_streams SET state='open',error=NULL WHERE stream_id=? AND state='failed'",(stream_id,))
-                db.close()
-            # Each thread has its own SQLite connections; WAL serializes writes.
+                with db.transaction():db.execute("UPDATE full_streams SET state='open',error=NULL WHERE stream_id=%s AND state='failed'",(stream_id,))
+                self._release(db)
             await asyncio.gather(*(asyncio.to_thread(self._stream,s) for s in
                 ('openalex-0','openalex-1','openalex-2','openalex-3','arxiv-0')))
             await asyncio.to_thread(self._finish_empty)
@@ -229,17 +251,17 @@ class FullPreparationWorkflow(PreparationWorkflow):
         except Exception as exc:
             self._stop_collection.set()
             db=self._db()
-            with db:db.execute('UPDATE run SET error=? WHERE id=1',('full_collection_failed:'+type(exc).__name__,))
-            db.close()
+            with db.transaction():db.execute('UPDATE run SET error=%s WHERE id=1',('full_collection_failed:'+type(exc).__name__,))
+            self._release(db)
             raise
         db=self._db()
-        with db:db.execute("UPDATE run SET collection_state='sealed',error=NULL WHERE id=1")
-        db.close()
+        with db.transaction():db.execute("UPDATE run SET collection_state='sealed',error=NULL WHERE id=1")
+        self._release(db)
 
     def status(self):
         result=super().status()
         db=self._db()
         try:
             result['full_streams']=[dict(r) for r in db.execute('SELECT stream_id,state,window_index,position,received,admitted,error FROM full_streams ORDER BY stream_id')]
-        finally:db.close()
+        finally:self._release(db)
         return result

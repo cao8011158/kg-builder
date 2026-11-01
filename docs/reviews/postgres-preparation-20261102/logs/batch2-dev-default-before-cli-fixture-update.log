@@ -1,0 +1,38 @@
+======================================================================
+ERROR: test_cli_reports_failure_stage (test_corpus_batch.CorpusBatchTests.test_cli_reports_failure_stage)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/db2b46501ae3/kg-builder/tests/test_corpus_batch.py", line 120, in test_cli_reports_failure_stage
+    self.assertEqual(main(args), 0)
+                     ^^^^^^^^^^
+  File "/workspace/scratch/db2b46501ae3/kg-builder/scripts/apply_corpus_batch.py", line 196, in main
+    raise SystemExit('Historical SQLite corpus batch CLI retired. Use '
+SystemExit: Historical SQLite corpus batch CLI retired. Use scripts/prepare_pipeline.py --run-id RUN_ID --run-dir ARTIFACT_DIR run with KG_DATABASE_URL.
+
+======================================================================
+ERROR: test_cli_validates_before_db_creation (test_extraction_validation.ValidationTests.test_cli_validates_before_db_creation)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/db2b46501ae3/kg-builder/tests/test_extraction_validation.py", line 145, in test_cli_validates_before_db_creation
+    with self.assertRaises(ValueError): import_main(['--input',str(input_path),'--db',str(db)])
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/db2b46501ae3/kg-builder/scripts/import_reviewed.py", line 19, in main
+    raise SystemExit('Historical SQLite import retired. Submit pinned v0.3 extraction '
+SystemExit: Historical SQLite import retired. Submit pinned v0.3 extraction tasks via scripts/prepare_pipeline.py --run-id RUN_ID --run-dir ARTIFACT_DIR submit --input FILE with KG_DATABASE_URL.
+
+======================================================================
+ERROR: test_default_collectors_exclude_semantic_scholar (test_ingestion.IngestionTests.test_default_collectors_exclude_semantic_scholar)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/db2b46501ae3/kg-builder/tests/test_ingestion.py", line 131, in test_default_collectors_exclude_semantic_scholar
+    collect_papers.main(['--db',str(self.dir/'collection.db'),'--query-config',str(config),
+  File "/workspace/scratch/db2b46501ae3/kg-builder/scripts/collect_papers.py", line 57, in main
+    raise SystemExit('Historical SQLite collector retired. Use scripts/prepare_pipeline.py --run-id RUN_ID --run-dir ARTIFACT_DIR run with KG_DATABASE_URL, or scripts/prepare_full_pipeline.py for pagination.')
+SystemExit: Historical SQLite collector retired. Use scripts/prepare_pipeline.py --run-id RUN_ID --run-dir ARTIFACT_DIR run with KG_DATABASE_URL, or scripts/prepare_full_pipeline.py for pagination.
+
+----------------------------------------------------------------------
+Ran 125 tests in 14.986s
+
+FAILED (errors=3)
+area_detail_vm cold=(69, 2, 605) warm=(69, 2, 605) unrelated_1000=(69, 2, 605)
+area_search_vm baseline=(207, 0, 400, 'area:memory') unrelated_1000_cold=(18299, 1, 397, 'area:memory') warm=(233, 0, 397, 'area:memory')

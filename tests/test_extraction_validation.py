@@ -142,7 +142,8 @@ class ValidationTests(unittest.TestCase):
     def test_cli_validates_before_db_creation(self):
         input_path=self.root/'input.json';db=self.root/'missing.db'
         input_path.write_text(json.dumps([self.draft,dict(self.draft,schema_version='future')]))
-        with self.assertRaises(ValueError): import_main(['--input',str(input_path),'--db',str(db)])
+        with self.assertRaisesRegex(SystemExit,'prepare_pipeline.py'):
+            import_main(['--input',str(input_path),'--db',str(db)])
         self.assertFalse(db.exists())
         input_path.write_text('[{"value": NaN}]')
         with self.assertRaises(ValueError): load_batch(input_path)

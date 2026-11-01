@@ -33,6 +33,18 @@ jobs:
       PYTHONPATH: src
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert checked-out source head
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          actual=$(git rev-parse HEAD)
+          test "$actual" = "$EXPECTED_HEAD_SHA"
+          mkdir -p "$RUNNER_TEMP/pg-test-logs"
+          printf '{"expected_head":"%s","checked_out_head":"%s"}\n' "$EXPECTED_HEAD_SHA" "$actual" | tee "$RUNNER_TEMP/pg-test-logs/checkout-head.json"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -43,6 +55,11 @@ jobs:
         run: |
           echo '::add-mask::ci_test_only_password'
           echo "::add-mask::$KG_TEST_DATABASE_URL"
+      - name: Inspect PostgreSQL test storage
+        env:
+          KG_TEST_EVIDENCE_DIR: ${{ runner.temp }}/pg-test-logs
+          PG_SERVICE_CONTAINER: ${{ job.services.postgres.id }}
+        run: python docs/reviews/postgres-preparation-20261102/storage_environment.py
       - name: Full regression
         shell: bash
         run: |
@@ -53,8 +70,10 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          test -f tests/postgres_integration.py
-          python -m unittest discover -s tests -p 'postgres_integration.py' -v 2>&1 | tee "$RUNNER_TEMP/pg-test-logs/postgres.log"
+          for suite in postgres_integration.py postgres_preparation.py postgres_full_preparation.py; do
+            test -f "tests/$suite" || { echo "Missing PostgreSQL suite: $suite"; exit 1; }
+          done
+          python -m unittest discover -s tests -p 'postgres*.py' -v 2>&1 | tee "$RUNNER_TEMP/pg-test-logs/postgres.log"
           grep -Eq 'Ran [1-9][0-9]* tests?' "$RUNNER_TEMP/pg-test-logs/postgres.log"
       - name: Independent source locality
         shell: bash

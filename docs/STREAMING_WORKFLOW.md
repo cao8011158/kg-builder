@@ -1,5 +1,11 @@
 # Streaming preparation and separate graph build
 
+The SQLite preparation commands below describe historical runs. New preparation
+requires `KG_DATABASE_URL` and the same stable `--run-id` on every
+`scripts/prepare_pipeline.py` or `scripts/prepare_full_pipeline.py` command.
+The run directory holds artifacts only; PostgreSQL owns source and workflow data.
+See [PostgreSQL preparation](POSTGRES_PREPARATION.md).
+
 New runs now default to `item-v1`: review each keyed item independently; after one failed initial review, repair that item once; a second failure drops only that item from downstream. Approved payloads remain frozen. Completeness questions are recorded as diagnostics and never trigger a repair or block the paper. At least one approved item admits usable paper content; all-empty output is an explicit `no_usable_items` terminal result. Historical configurations without a policy retain `legacy-paper`.
 
 Jev uses a shared bounded HTTP budget (default `--jev-concurrency 4`), with independent `--scope-workers 2` and `--review-workers 2`. Generative API preparation uses `--generation-concurrency 3`; graph API naming uses `--name-concurrency 3`. External workers can claim distinct tasks concurrently. See [the item and concurrency contract](PARALLEL_ITEM_WORKFLOW_CONTRACT.md).

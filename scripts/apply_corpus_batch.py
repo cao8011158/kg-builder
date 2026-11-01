@@ -193,30 +193,7 @@ def run(master_path, sidecar_path, manifest, reviews, extractions, batch_id, app
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    for arg in ('master', 'sidecar', 'input-manifest', 'reviews', 'extractions', 'batch-id', 'report'):
-        parser.add_argument('--' + arg, required=True)
-    parser.add_argument('--apply', action='store_true')
-    args = parser.parse_args(argv)
-    data = vars(args)
-    report = Path(args.report)
-    try:
-        if report.resolve() in {Path(data[key]).resolve() for key in
-                                ('master', 'sidecar', 'input_manifest', 'reviews', 'extractions')}:
-            raise ValueError('Report path must differ from databases and input files')
-        manifest, reviews, extractions = (load(data[k]) for k in ('input_manifest', 'reviews', 'extractions'))
-        result = run(args.master, args.sidecar, manifest, reviews, extractions, args.batch_id, args.apply)
-    except Exception as exc:
-        if isinstance(exc, SidecarFailure):
-            report.parent.mkdir(parents=True, exist_ok=True)
-            report.write_text(json.dumps(exc.result, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
-        # Invalid input never overwrites a successful report.
-        print(f'{type(exc).__name__}: {exc}', file=sys.stderr)
-        return 1
-    report.parent.mkdir(parents=True, exist_ok=True)
-    report.write_text(json.dumps(result, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
-    print(json.dumps(result, ensure_ascii=False))
-    return 0
+    raise SystemExit('Historical SQLite corpus batch CLI retired. Use scripts/prepare_pipeline.py --run-id RUN_ID --run-dir ARTIFACT_DIR run with KG_DATABASE_URL.')
 
 
 if __name__ == '__main__':

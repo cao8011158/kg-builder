@@ -1,5 +1,9 @@
 # Metadata collection operations and limits
 
+These commands manage historical SQLite corpus files with explicit database paths.
+For a new preparation run use PostgreSQL through `scripts/prepare_pipeline.py` or
+`scripts/prepare_full_pipeline.py` with `KG_DATABASE_URL` and `--run-id`.
+
 ## Run API collection (networked Work or Colab only)
 
 ```bash

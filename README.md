@@ -13,6 +13,12 @@ The corpus is a **candidate metadata pool** until a relevance review is performe
 
 ## Current code
 
+- New preparation uses PostgreSQL. Set `KG_DATABASE_URL`, then run
+  `python scripts/prepare_pipeline.py --run-id fresh60 --run-dir /private/run60 run`.
+  Reuse that logical ID for claim, submit, status and snapshot. Full pagination
+  uses `scripts/prepare_full_pipeline.py`. See [PostgreSQL preparation](docs/POSTGRES_PREPARATION.md).
+- The SQLite corpus commands below are historical explicit-path workflows; they
+  do not feed a new PostgreSQL preparation run.
 - `scripts/collect_papers.py`: source search from OpenAlex, Semantic Scholar, and arXiv; candidate date gate, topic tagging and SQLite upsert. This CLI does **not** invoke any LLM.
 - `src/kg_builder/collectors.py`: real HTTP API collectors, retry/backoff, source record capture. Network API calls have **not** been executed or tested in the original restricted environment.
 - `src/kg_builder/storage.py`: SQLite Paper / PaperVersion / source record / extraction record / discovery hit / topic tables. Strong-ID dedup is partial; nonmatching IDs are not blindly merged by title.

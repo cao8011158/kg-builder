@@ -1,0 +1,11 @@
+test_alias_versions_and_idempotent_source (postgres_integration.PostgresSourceTests.test_alias_versions_and_idempotent_source) ... ok
+test_concurrent_initialization_of_same_run (postgres_integration.PostgresSourceTests.test_concurrent_initialization_of_same_run) ... ok
+test_concurrent_same_identity (postgres_integration.PostgresSourceTests.test_concurrent_same_identity) ... ok
+test_conflicting_identifiers_rejected (postgres_integration.PostgresSourceTests.test_conflicting_identifiers_rejected) ... ok
+test_extraction_idempotency_and_concurrent_natural_key (postgres_integration.PostgresSourceTests.test_extraction_idempotency_and_concurrent_natural_key) ... ok
+test_schema_isolation_and_transaction_rollback (postgres_integration.PostgresSourceTests.test_schema_isolation_and_transaction_rollback) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 2.657s
+
+OK

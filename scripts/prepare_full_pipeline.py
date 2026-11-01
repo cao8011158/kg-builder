@@ -12,6 +12,7 @@ from kg_builder.full_preparation import FullPreparationWorkflow
 def main(argv=None):
     p=argparse.ArgumentParser()
     p.add_argument('--run-dir',type=Path,required=True)
+    p.add_argument('--run-id',required=True,help='Stable logical PostgreSQL run identifier')
     sub=p.add_subparsers(dest='command',required=True)
     run=sub.add_parser('run')
     run.add_argument('--plan',type=Path)
@@ -38,7 +39,7 @@ def main(argv=None):
               'review_workers','lease_seconds','repair_limit','item_max_reviews','jev_model')}
         kw['min_confidence']=a.min_probability
         if a.plan:kw['plan']=json.loads(a.plan.read_text())
-    wf=FullPreparationWorkflow(a.run_dir,**kw)
+    wf=FullPreparationWorkflow(a.run_dir,run_id=a.run_id,**kw)
     if a.command=='run':result=asyncio.run(wf.run())
     elif a.command=='claim':
         result=wf.claim(a.kind,a.limit,a.worker)

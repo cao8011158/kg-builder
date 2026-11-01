@@ -67,7 +67,9 @@ CREATE TABLE IF NOT EXISTS papers (
  review_state TEXT NOT NULL DEFAULT 'none', review_json TEXT,
  extraction_json TEXT, reason TEXT, attempts INTEGER NOT NULL DEFAULT 0,
  discovered DOUBLE PRECISION NOT NULL, scope_started DOUBLE PRECISION,
- scoped DOUBLE PRECISION, reviewed DOUBLE PRECISION, review_started DOUBLE PRECISION);
+ scoped DOUBLE PRECISION, reviewed DOUBLE PRECISION, review_started DOUBLE PRECISION,
+ scope_token TEXT, scope_lease_until DOUBLE PRECISION,
+ review_token TEXT, review_lease_until DOUBLE PRECISION);
 CREATE INDEX IF NOT EXISTS idx_papers_scope ON papers(scope_state,discovered);
 CREATE INDEX IF NOT EXISTS idx_papers_review ON papers(review_state,discovered);
 CREATE TABLE IF NOT EXISTS tasks (
@@ -115,12 +117,14 @@ CREATE TABLE IF NOT EXISTS full_streams (
  window_index INTEGER NOT NULL DEFAULT 0, position TEXT NOT NULL,
  state TEXT NOT NULL DEFAULT 'open', received INTEGER NOT NULL DEFAULT 0,
  window_received INTEGER NOT NULL DEFAULT 0, admitted INTEGER NOT NULL DEFAULT 0,
- next_request_at DOUBLE PRECISION NOT NULL DEFAULT 0, error TEXT);
+ next_request_at DOUBLE PRECISION NOT NULL DEFAULT 0, error TEXT,
+ lease_token TEXT, lease_until DOUBLE PRECISION);
 CREATE INDEX IF NOT EXISTS idx_full_streams_state ON full_streams(state,next_request_at);
 CREATE TABLE IF NOT EXISTS full_pages (
  stream_id TEXT NOT NULL REFERENCES full_streams(stream_id),
  window_index INTEGER NOT NULL, position TEXT NOT NULL, raw BYTEA NOT NULL,
  state TEXT NOT NULL DEFAULT 'fetched', count INTEGER, total INTEGER,
+ applied_rows INTEGER NOT NULL DEFAULT 0, admitted INTEGER NOT NULL DEFAULT 0,
  PRIMARY KEY(stream_id,window_index,position));
 CREATE INDEX IF NOT EXISTS idx_full_pages_state ON full_pages(stream_id,state);
 CREATE TABLE IF NOT EXISTS full_deferred (

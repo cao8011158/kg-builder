@@ -11,6 +11,7 @@ from kg_builder.preparation import PreparationWorkflow
 def main(argv=None):
     p=argparse.ArgumentParser()
     p.add_argument('--run-dir',type=Path,required=True)
+    p.add_argument('--run-id',required=True,help='Stable logical PostgreSQL run identifier')
     sub=p.add_subparsers(dest='command',required=True)
     run=sub.add_parser('run')
     run.add_argument('--target',type=int,default=60);run.add_argument('--llm-mode',choices=['external','api'],default='external')
@@ -42,7 +43,7 @@ def main(argv=None):
         p.error('TYPESAFE_API_KEY is required for Jev scope and field review')
     if a.command=='run' and a.llm_mode=='api' and not os.getenv('LLM_API_KEY'):
         p.error('LLM_API_KEY is required for API extraction')
-    wf=PreparationWorkflow(a.run_dir,**kw)
+    wf=PreparationWorkflow(a.run_dir,run_id=a.run_id,**kw)
     if a.command=='run': result=asyncio.run(wf.run())
     elif a.command=='claim':
         result=wf.claim(a.kind,a.limit,a.worker)

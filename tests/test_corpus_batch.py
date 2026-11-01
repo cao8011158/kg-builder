@@ -117,12 +117,14 @@ class CorpusBatchTests(unittest.TestCase):
                 '--batch-id', 'b1', '--report', str(report)]
         for name, path in paths.items():
             args += ['--' + name, str(path)]
-        self.assertEqual(main(args), 0)
-        self.assertEqual(json.loads(report.read_text())['stage'], 'validated')
+        with self.assertRaisesRegex(SystemExit,'prepare_pipeline.py'):
+            main(args)
+        self.assertFalse(report.exists())
         self.assertFalse(self.sidecar.exists())
         bad_args = args.copy()
         bad_args[bad_args.index('--report') + 1] = str(self.master)
-        self.assertEqual(main(bad_args), 1)
+        with self.assertRaisesRegex(SystemExit,'prepare_pipeline.py'):
+            main(bad_args)
 
     def test_real_manifest_pin_metadata_and_excluded_empty_topics(self):
         manifest = copy.deepcopy(self.manifest)
