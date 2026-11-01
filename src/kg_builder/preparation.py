@@ -430,7 +430,8 @@ class PreparationWorkflow:
                 if not n:await asyncio.sleep(poll_seconds)
             db=self._db()
             with db:
-                if state=='sealed' and outstanding==0:db.execute('UPDATE run SET completed=? WHERE id=1',(time.time(),))
+                if state=='sealed' and outstanding==0:
+                    db.execute('UPDATE run SET completed=COALESCE(completed,?) WHERE id=1',(time.time(),))
             db.close()
         finally:
             if producer:

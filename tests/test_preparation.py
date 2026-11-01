@@ -37,6 +37,30 @@ class PreparationTests(unittest.TestCase):
         self.w=PreparationWorkflow(self.tmp.name,target=2,client=object(),scope_fn=scope,review_fn=review,embedding=Embedding(),lease_seconds=1)
     def add(self,n):self.w.add_source(source(n),'arxiv','agent memory','agent_memory')
 
+    def test_terminal_replay_preserves_first_completion_and_work(self):
+        self.add(12);self.w._scope_batch()
+        task=self.w.claim('extract',1,'worker')[0]
+        self.w.submit([dict(task_id=task['task_id'],lease_token=task['lease_token'],
+                            input_hash=task['input_hash'],result=draft(task))])
+        self.w._review_batch()
+        db=self.w._db()
+        with db:db.execute("UPDATE run SET collection_state='sealed' WHERE id=1")
+        db.close()
+        first=asyncio.run(self.w.run(collect=False))
+        db=self.w._db()
+        before=(db.execute('SELECT completed FROM run WHERE id=1').fetchone()[0],
+                db.execute('SELECT count(*) FROM tasks').fetchone()[0],
+                db.execute('SELECT count(*) FROM decision_audits').fetchone()[0])
+        db.close()
+        second=asyncio.run(self.w.run(collect=False))
+        db=self.w._db()
+        after=(db.execute('SELECT completed FROM run WHERE id=1').fetchone()[0],
+               db.execute('SELECT count(*) FROM tasks').fetchone()[0],
+               db.execute('SELECT count(*) FROM decision_audits').fetchone()[0])
+        db.close()
+        self.assertEqual(before,after)
+        self.assertEqual(first['wall_seconds'],second['wall_seconds'])
+
     def test_claim_locality_ignores_completed_same_kind_tasks(self):
         self.add(9);self.w._scope_batch()
         db=self.w._db()

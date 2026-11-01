@@ -5,8 +5,9 @@ test_claim_locality_ignores_completed_same_kind_tasks (tests.test_preparation.Pr
 test_repair_limit_and_expired_lease (tests.test_preparation.PreparationTests.test_repair_limit_and_expired_lease) ... ok
 test_shortfall_and_stop_before_loop (tests.test_preparation.PreparationTests.test_shortfall_and_stop_before_loop) ... ok
 test_streaming_snapshot_and_restart (tests.test_preparation.PreparationTests.test_streaming_snapshot_and_restart) ... ok
+test_terminal_replay_preserves_first_completion_and_work (tests.test_preparation.PreparationTests.test_terminal_replay_preserves_first_completion_and_work) ... ok
 
 ----------------------------------------------------------------------
-Ran 7 tests in 3.069s
+Ran 8 tests in 3.199s
 
 OK

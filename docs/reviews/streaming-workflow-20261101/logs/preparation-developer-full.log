@@ -52,6 +52,7 @@ test_claim_locality_ignores_completed_same_kind_tasks (test_preparation.Preparat
 test_repair_limit_and_expired_lease (test_preparation.PreparationTests.test_repair_limit_and_expired_lease) ... ok
 test_shortfall_and_stop_before_loop (test_preparation.PreparationTests.test_shortfall_and_stop_before_loop) ... ok
 test_streaming_snapshot_and_restart (test_preparation.PreparationTests.test_streaming_snapshot_and_restart) ... ok
+test_terminal_replay_preserves_first_completion_and_work (test_preparation.PreparationTests.test_terminal_replay_preserves_first_completion_and_work) ... ok
 test_minimal_contract_and_rejections (test_retrieval_extraction.RetrievalTests.test_minimal_contract_and_rejections) ... ok
 test_optional_api_disabled (test_retrieval_extraction.RetrievalTests.test_optional_api_disabled) ... ok
 test_pinned_versions_and_atomic_mixed_batch (test_retrieval_extraction.RetrievalTests.test_pinned_versions_and_atomic_mixed_batch) ... ok
@@ -87,13 +88,13 @@ test_pending_pair_and_stale_lease (test_snapshot_graph.SnapshotGraphTests.test_p
 test_restored_snapshot_path_and_timestamp_accept_same_bytes_only (test_snapshot_graph.SnapshotGraphTests.test_restored_snapshot_path_and_timestamp_accept_same_bytes_only) ... ok
 
 ----------------------------------------------------------------------
-Ran 86 tests in 7.218s
+Ran 87 tests in 8.423s
 
 OK
 {"batch_id": "b1", "stage": "validated", "papers": 1, "extractions": 1, "reviews": 1, "master_new": 0, "sidecar_imported": 0}
 {
-  "started_at": "2026-11-01T09:34:54.299821+00:00",
-  "completed_at": "2026-11-01T09:34:54.309148+00:00",
+  "started_at": "2026-11-01T09:58:59.678669+00:00",
+  "completed_at": "2026-11-01T09:58:59.695006+00:00",
   "mode": "api_first_page",
   "since": "2025-01-01",
   "until": "2026-11-01",

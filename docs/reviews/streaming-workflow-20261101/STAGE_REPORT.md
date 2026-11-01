@@ -70,3 +70,46 @@ SFW-06（P2，本step建图恢复边界）已修正：同字节快照下载／�
 ## 并发写入诊断及修正完成
 
 SFW-07确认为P2、本step数据准备集成引入：collector.upsert_paper与字段复核ingest_extractions在master.sqlite3并发写入，复核读pin后SAVEPOINT升级写锁可能发生SQLITE_BUSY_SNAPSHOT；claim的workflow.sqlite3锁不能解决master写入。修正是在本step _review_batch对master先BEGIN IMMEDIATE，再读pin与ingest，未修改既有storage.py。恢复采集未结束前提交的原测试，并明确断言首篇ready时collection仍open，随后才释放producer。开发者重复5轮、定向7项、全仓86项通过。日志preparation-developer-streaming-repeat/targeted/full。撤销等待collectionsealed以避开冲突的测试改法；不把该改法当作有效修复。
+
+## 正式独立review第2轮 — 通过代码审阅，进入真实验收
+
+固定远端head：b5af7c94d028b85be1668e4931a05fcdc2a5e02b；完整base仍ffdff5cd09b789072bc0fc46f13c9ebf87f7e2f7。已fetch，远端／本地tree均c8ed4f975386d93d8f4c04b44ae1814c5c6ddbd0，main目标未变。主Agent独立复跑86项全仓通过（7.223秒），review-r2-full.log；跨组件六篇外部worker／24vector／独立图与索引探针再次通过，review-r2-integration.log。额外10个全新synthetic流式实例全部成功，root-streaming-stress.log。
+
+SFW-01/03/04/05/06/07均addressed：逐条模型问题定位；平衡来源与API模式；精确源文、最终显示名审计与索引；活跃队列实际读取量不随done历史增长；异地同字节快照恢复；master写入先取写锁且采集未结束已完成首篇复核。来源变化、旧lease、幂等、repair上限及pending、空快照和篡改反例均保留。没有未解决代码阻塞；真实60篇和真实Jev图语义尚待验收，不由模拟通过代替。
+
+开始真实运行：全新preparation目录，target60唯一候选、两来源三查询、per-query40、batch5、jev-1.14.0、外部生成式worker。生成式LLM API key不注入；不读取旧extractions。准备与图阶段各自计时，开发／审阅耗时不混入真实处理wall。
+
+## 真实准备运行进度（尚未完成）
+
+运行ID3810ed2e0cba440c8e384de9f88f9d5e，代码b5af7c94d028b85be1668e4931a05fcdc2a5e02b。6个源查询成功，返回240条候选；按两源三方向分配60个唯一候选（OpenAlex30、arXiv30）。source fetch/解析累计44.258秒，候选入库／规范化1.340秒，六查询采集阶段累计46.824秒；collection_request.calls=240是generator yield计数，不是HTTP请求数，源HTTP查询6次。scope完成47 include／5 exclude／8 pending，60篇scope请求累计75.14秒（此阶段与采集重叠，不能相加当wall）。
+
+47篇全新初次LLM提取均由外部worker经claim/submit完成，不复用旧输出，不调用生成式API。Jev低于0.7置信度的完整性检查触发大量修正，尚在继续；当前不能把结构接收稿数当作ready数。首个活动检查点保存并readback验证到既有项目子目录：Drive file1Am4YyKQ-thuuLc8QiXk1GHMlFD8yCWpv，833684bytes，SHA256 4d0c02c68a7c063c596e23346eaf6580e5272fed3e9ff367092f7a9e54978497，解包扫描未发现凭据；这是active checkpoint，不是最终快照。数据库按workflow先、master后做SQLite backup并quick_check，不直接复制写入中的数据库。
+
+## 真实准备60候选 — 运行完成，质量门保留待定
+
+- 运行进程exit0；流水线wall718.613秒（11分58.6秒），向量/快照另3.222秒（含81条384维向量，local encode3.169秒）。从run起点到快照完成约753秒，包含命令交接，不能用阶段相加掩盖此间隔。
+- scope47 include／5 exclude／8 pending；47篇全部完成新LLM提取，另81次修正，全部经过队列与Jev复核。最终11 ready、36字段复核pending，加8scope pending，共44pending；不是从60里只抽11篇处理。待定稿和全部128次复核历史均保留。
+- 真实Jev scope12请求75.141秒、字段复核88请求618.484秒，均无HTTP重试；usage分别input61487/output9696及input419684/output71146。字段复核占流水线wall约86%，目前是主瓶颈。
+- 外部claim→submit累计2986.104秒，时间区间并集492.323秒；多worker/batch重叠，二者都不等于纯模型推理时间，不与API耗时相加作为总wall。
+- 这轮完整性置信度0.7规则引发大量重复修正，许多低置信度问题修正后仍未消失。代码流程完成不代表质量门已适合生产；11篇可用于当前通过子集的功能／时间测试，不能当成60篇通过或质量准确率。
+- 冻结snapshot hash7fec3ae663e457a67a2035c29e1f83e3d9b20bec973670fbffbe26e216eef412，counts60collected/11ready/5excluded/44pending。准备阶段未建共享实体／HNSW／Leiden。机器可读preparation-timing.json和snapshot-execution.json在私有验收数据目录。
+
+接下来仅从该11篇、81vector快照独立建图计时，明确规模限制；不放行待定记录，也不覆盖旧365篇库。
+
+## 独立图任务 — 真实运行完成，进入恢复验收
+
+输入仅冻结的11篇ready数据：11 ResearchProblem、26 Method、17 Benchmark描述及27 paper-local contributions，共81vector。整批候选483对，480 different／1 same／2 pending；执行一次ResearchProblem Leiden提案后保留语义判定。外部worker领取提交11个RP名称定义，并由Jev检查最终显示内容。
+
+图任务wall295.603秒（4分55.6秒）。本地快照导入0.151秒、候选图0.058秒、写入0.027秒、冷检索索引构建并查询1.448秒，合计1.684秒；这些是本地阶段elapsed，不是process CPU-seconds。Jev35个请求257.589秒、无重试；pair阶段225.215秒、group23.470秒、最终名称检查9.098秒。外部名称任务claim→submit累计121.122秒、排队累计125.105秒，都包含多任务重叠，不当成wall相加。
+
+产物46canonical entities、54原始描述，其中46建立来源连接、8仍pending；7pending groups及2pending pairs保留，27contributions保持paper-local。4个冷HNSW索引完成实际查询，62cache hits，11个新canonical RP文本向量本地计算；不重复计算兼容快照mentions。该规模只能证明11篇通过子集的功能与时间，不能外推60／365篇全量建图吞吐或身份准确率。
+
+旧365篇工作主库及旧171来源语义库SHA检查未变；准备快照已上传下载并核验SHA256、两库quick_check及60/11/5/44counts。接下来完成图包上传下载、异地恢复及cold dense+sparse/source定位验证。
+
+## 恢复验收发现SFW-08，重开本代码batch
+
+SFW-08（P2，本step数据准备、当前实现引入）：对已完成运行再次调用run，会无条件重写completed时间，导致历史处理wall增长。主Agent在真实60篇数据库backup副本复现：718.613秒变为1311.596秒；未调用API，原运行数据库未动。证据私有terminal-replay-prefixed.json。根因是终态时间UPDATE未保留第一次完成值。修正只需COALESCE／completed IS NULL，增加完成重放后wall、task、audit不变的定向反例。已派开发修复；随后固定提交进行第3轮正式review，保留前两轮历史。无需重新付费处理60篇；在恢复副本验证终态重放和完整查询即可。暂停最终交付，图和准备结果保留。
+
+## SFW-08修正开发完成（待第3轮固定提交审阅）
+
+completed改为COALESCE保留首次终态时间。新增重放反例验证completed、wall、tasks、audit均不变；开发者8项定向、87项全仓通过。对真实60篇备份副本重放，无API调用，718.612883秒、128tasks、188audits均不变；日志preparation-developer-terminal-replay.log。原数据库未动，真实性能数据仍对应b5af7c94d028b85be1668e4931a05fcdc2a5e02b；这次终态重放修复不改变已测量的初次处理工作，后续用修正代码验证恢复，不重新计费处理60篇。
