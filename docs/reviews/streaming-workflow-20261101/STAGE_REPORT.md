@@ -113,3 +113,15 @@ SFW-08（P2，本step数据准备、当前实现引入）：对已完成运行�
 ## SFW-08修正开发完成（待第3轮固定提交审阅）
 
 completed改为COALESCE保留首次终态时间。新增重放反例验证completed、wall、tasks、audit均不变；开发者8项定向、87项全仓通过。对真实60篇备份副本重放，无API调用，718.612883秒、128tasks、188audits均不变；日志preparation-developer-terminal-replay.log。原数据库未动，真实性能数据仍对应b5af7c94d028b85be1668e4931a05fcdc2a5e02b；这次终态重放修复不改变已测量的初次处理工作，后续用修正代码验证恢复，不重新计费处理60篇。
+
+## 正式独立review第3轮 — 通过
+
+固定远端head e6e2c0ad62dc7883d5a84267e5dbb15197ab8a73，完整base仍ffdff5cd09b789072bc0fc46f13c9ebf87f7e2f7；fetch核验本地／远端tree均fa0fca7db4bc09cc6b57909ae60cf8e30a0ba9ea。主Agent独立87项全仓通过（7.762秒）、跨组件六篇探针再次通过，review-r3-full/integration.log。SFW-08 addressed；检查保留首次completed的最小改动和终态重放根因，不修改已完成任务／审计或制造新API调用。
+
+真实完整包上传后重新下载SHA256一致：4f84c9bd3d9163506ed2e90dd20c1b10a55d4bec84adb809ab55a0ff7f0631a2，1995750bytes，内部160文件逐一manifest哈希通过。异地路径恢复5个SQLite库全部quick_check=ok、foreign_key_check为空；准备任务重放保持718.612883秒／128tasks／188audits，图重放保持295.603266秒／35Jev请求，两次重放均无API。cold检索重建4个dense索引、73个向量cache hits、0实体向量重算；RP/Method/Benchmark精确名称hybrid检索均命中预期ID并定位原始paper mentions。额外3个查询文本本地编码不冒充实体向量重算。恢复后11sources/54mentions/46entities/8pending/27contributions不变。日志review-r3-live-restore.log，机器可读complete-restore-check.json。
+
+交付数据：[pipeline60-complete.zip](https://drive.google.com/file/d/1GeeDqXxkSfYKop1mlCi-9HguZ7tuuM9u/view?usp=drivesdk)。包含两阶段数据库、原始候选/源payload、所有提取/修正/审计/命名任务、81个prepared向量、候选图、逐阶段计时、环境版本和恢复指引；不含凭据／模型权重。旧365篇库hash未变。所有确认代码问题关闭，无P0/P1、无未解决代码阻塞，正式review共3轮，没有重置轮次。功能与恢复验收完成，未验证生成式API实调或身份质量准确率。当前仍是草稿PR／工作分支，没有main合并授权。
+
+## 解释与后续判断
+
+本次目标是测当前流程，不调整运行中规则来提高通过数量。结果表明字段完整性置信度0.7产生81次修正且36篇仍待定；应先校准检查粒度和待定／修正路由，再评估长期吞吐。待定不表示论文无关，也不证明生成字段错误。图测试仅11篇通过子集，不能宣称60篇建图性能或跨论文身份准确率；1.684秒本地执行与257.589秒Jev判断已分开。开发与审阅耗时未混入上述两阶段实际运行wall。

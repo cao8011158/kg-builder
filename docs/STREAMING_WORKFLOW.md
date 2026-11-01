@@ -28,3 +28,5 @@ Graph naming submissions use the same task/lease/input hash envelope, with `resu
 Keep preparation and graph timings separate. Report actual total wall time, API request/retry elapsed, external claim-to-submit time, queue waits, and local processing. Parallel task-duration sums are not wall time. A completed run may retain pending records; always report their counts. The optional generative API path is preserved but is not exercised by an external-mode run.
 
 Architecture and exact schemas: [contract](STREAMING_WORKFLOW_CONTRACT.md). Current development and acceptance evidence: [stage report](reviews/streaming-workflow-20261101/STAGE_REPORT.md).
+
+For assignment API mode, supply `LLM_API_KEY` and choose `run --llm-mode api --llm-base-url URL --llm-model MODEL`. For graph naming API mode, supply `--name-mode api --name-base-url URL --name-model MODEL` before `run`. Both modes use the same validators and state transitions; the measured run used external generation and did not exercise these live generative calls.
