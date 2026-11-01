@@ -1,0 +1,67 @@
+{
+  "download_sha_verified": true,
+  "api_calls": 0,
+  "databases": {
+    "preparation/workflow.sqlite3": {
+      "quick_check": "ok",
+      "foreign_key_violations": 0
+    },
+    "preparation/master.sqlite3": {
+      "quick_check": "ok",
+      "foreign_key_violations": 0
+    },
+    "graph/graph.sqlite": {
+      "quick_check": "ok",
+      "foreign_key_violations": 0
+    },
+    "graph/semantic.sqlite": {
+      "quick_check": "ok",
+      "foreign_key_violations": 0
+    },
+    "graph/snapshot-master.sqlite": {
+      "quick_check": "ok",
+      "foreign_key_violations": 0
+    }
+  },
+  "preparation": {
+    "terminal_replay_unchanged": true,
+    "ready": 46,
+    "tasks": {
+      "extract/done": 46,
+      "repair_extraction/done": 3
+    },
+    "wall_seconds": 318.9551031589508,
+    "peak": 4
+  },
+  "graph": {
+    "terminal_replay_unchanged": true,
+    "jev_requests": 227,
+    "index_status": "verified",
+    "completed_at": 1793540243.744334
+  },
+  "cold_indexes": {
+    "embedding_cache_hits": 259,
+    "embeddings_computed": 0,
+    "dense_index_builds": 4,
+    "detail_rows": 0
+  },
+  "restore_queries": [
+    {
+      "kind": "ResearchProblem",
+      "name": "Restart monitor decision value",
+      "rank": 1
+    },
+    {
+      "kind": "Method",
+      "name": "Agentic Memory (AgeMem)",
+      "rank": 1
+    },
+    {
+      "kind": "Benchmark",
+      "name": "\u03c4\u00b3-Bench",
+      "rank": 1
+    }
+  ],
+  "acceptance_identical": true,
+  "wall_seconds": 2.3000655799987726
+}

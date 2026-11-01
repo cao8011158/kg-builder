@@ -1,0 +1,194 @@
+{
+  "code_sha": "9282c61d9f1eed6d1b6a88c364cd21eb5d655acf",
+  "run_id": "8bee626f2b164f58883da8e7f2b5d36f",
+  "policy": {
+    "batch_size": 5,
+    "generation_concurrency": 3,
+    "item_max_reviews": 2,
+    "jev_concurrency": 4,
+    "jev_model": "jev-1.14.0",
+    "lease_seconds": 1800,
+    "llm_mode": "external",
+    "min_confidence": 0.7,
+    "per_query": 40,
+    "repair_limit": 2,
+    "review_policy": "item-v1",
+    "review_workers": 2,
+    "scope_workers": 2,
+    "since": "2025-01-01",
+    "target": 60,
+    "until": "2026-11-01"
+  },
+  "engine_wall_seconds": 318.9551031589508,
+  "process_wall_seconds": 319.3564774849983,
+  "snapshot": {
+    "counts": {
+      "collected": 60,
+      "ready": 46,
+      "excluded": 5,
+      "pending": 9,
+      "no_usable_items": 0
+    },
+    "snapshot_hash": "65015c638bb028e74139e248abdfbb391fb8875f3beddb0d5fc47229c4700b41",
+    "vectors": 346,
+    "wall_seconds": 8.068963981000707,
+    "created_epoch": 1793538678.3429835
+  },
+  "end_to_end_until_snapshot_seconds": 567.0509128570557,
+  "command_handoff_gap_seconds": 240.02684571710415,
+  "scope_counts": {
+    "exclude": 5,
+    "include": 46,
+    "pending": 9
+  },
+  "review_counts": {
+    "none": 14,
+    "ready": 46
+  },
+  "item_counts": {
+    "approved": 346
+  },
+  "item_attempt_counts": [
+    [
+      1,
+      "approved",
+      342
+    ],
+    [
+      2,
+      "approved",
+      4
+    ]
+  ],
+  "task_counts": {
+    "extract": 46,
+    "repair_extraction": 3
+  },
+  "api": {
+    "scope": {
+      "logical_requests": 13,
+      "http_attempts": 13,
+      "request_seconds": 199.59360329899937,
+      "usage": {
+        "input_tokens": 61772,
+        "output_tokens": 9699
+      }
+    },
+    "item_review": {
+      "logical_requests": 23,
+      "http_attempts": 23,
+      "request_seconds": 304.7225767500022,
+      "usage": {
+        "input_tokens": 251622,
+        "output_tokens": 15262
+      }
+    },
+    "completeness": {
+      "logical_requests": 11,
+      "http_attempts": 11,
+      "request_seconds": 165.25125191700863,
+      "usage": {
+        "input_tokens": 91375,
+        "output_tokens": 9601
+      }
+    }
+  },
+  "jev_concurrency_stats": {
+    "active": 0,
+    "cumulative_queue_duration_s": 0.0006799979782954324,
+    "cumulative_request_duration_s": 669.5674319660102,
+    "finished": 47,
+    "peak_active": 4,
+    "peak_queued": 1,
+    "queued": 0,
+    "request_wall_union_s": 284.3591418170072,
+    "started": 47
+  },
+  "external_service_sum_seconds": 1600.7849791049957,
+  "external_task_interval_union_seconds": 187.15080642700195,
+  "metrics": {
+    "collection_request": {
+      "stage": "collection_request",
+      "calls": 240,
+      "active_seconds": 0.0,
+      "api_seconds": 102.23562097549438,
+      "service_seconds": 0.0,
+      "queued_seconds": 0.0
+    },
+    "collection_normalize": {
+      "stage": "collection_normalize",
+      "calls": 240,
+      "active_seconds": 2.4601924419403076,
+      "api_seconds": 0.0,
+      "service_seconds": 0.0,
+      "queued_seconds": 0.0
+    },
+    "collection": {
+      "stage": "collection",
+      "calls": 6,
+      "active_seconds": 106.86010575294495,
+      "api_seconds": 0.0,
+      "service_seconds": 0.0,
+      "queued_seconds": 0.0
+    },
+    "scope": {
+      "stage": "scope",
+      "calls": 60,
+      "active_seconds": 199.73816275596607,
+      "api_seconds": 0.0,
+      "service_seconds": 0.0,
+      "queued_seconds": 80.62977385520935
+    },
+    "scope_api": {
+      "stage": "scope_api",
+      "calls": 13,
+      "active_seconds": 0.0,
+      "api_seconds": 199.59360329899937,
+      "service_seconds": 0.0,
+      "queued_seconds": 0.0
+    },
+    "extract_queue": {
+      "stage": "extract_queue",
+      "calls": 49,
+      "active_seconds": 0.0,
+      "api_seconds": 0.0,
+      "service_seconds": 0.0,
+      "queued_seconds": 4357.296622037888
+    },
+    "external_extraction": {
+      "stage": "external_extraction",
+      "calls": 49,
+      "active_seconds": 0.0,
+      "api_seconds": 0.0,
+      "service_seconds": 1600.7849791049957,
+      "queued_seconds": 0.0
+    },
+    "item_review": {
+      "stage": "item_review",
+      "calls": 49,
+      "active_seconds": 334.0019345283508,
+      "api_seconds": 0.0,
+      "service_seconds": 0.0,
+      "queued_seconds": 0.0
+    },
+    "snapshot_embedding": {
+      "stage": "snapshot_embedding",
+      "calls": 1,
+      "active_seconds": 7.8773744106292725,
+      "api_seconds": 0.0,
+      "service_seconds": 0.0,
+      "queued_seconds": 0.0
+    }
+  },
+  "comparison": {
+    "baseline_engine_seconds": 718.6128830909729,
+    "engine_wall_reduction_fraction": 0.5561517046743891,
+    "baseline_ready": 11,
+    "current_ready": 46,
+    "same_paper_ids": 60,
+    "baseline_jev_requests": 100,
+    "current_jev_requests": 47,
+    "baseline_jev_mean_request_seconds": 6.9362495761299305,
+    "note": "Fresh fetched source set has same60 stableIDs, but newscope/extraction outputs, item routing and request latency differ; wall reduction cannot be attributed only to concurrency."
+  }
+}

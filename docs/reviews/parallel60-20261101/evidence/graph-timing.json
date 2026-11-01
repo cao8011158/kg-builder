@@ -1,0 +1,27 @@
+{
+  "code_sha": "9282c61d9f1eed6d1b6a88c364cd21eb5d655acf",
+  "initial_execution_wall_seconds": 851.8790396010008,
+  "initial_execution_receipt": "graph-execution.json",
+  "stages": {
+    "snapshot_import_cpu": 0.5883843779993185,
+    "candidate_graph_cpu": 0.143591876996652,
+    "jev_api_request_seconds": 2105.266669169978,
+    "jev_api_elapsed_seconds": 2105.3707159109836,
+    "jev_retry_count": 0.0,
+    "jev_pair_wall": 594.8594362580006,
+    "jev_group_wall": 27.501665430001594,
+    "materialize_cpu": 0.06861811698763631,
+    "name_queued_wait": 5881.186589956284,
+    "name_external_service": 342.83551263809204,
+    "jev_final_name_wall": 8.64636192800026,
+    "retrieval_index_cpu": 2.76139842900011
+  },
+  "request_count": 227,
+  "http_peak": 4,
+  "http_wall_union_seconds": 629.6626267433167,
+  "candidate_pairs": 3205,
+  "pipeline_preparation_includes_collection": true,
+  "active_stage_wall_sum_seconds": 1178.9031067409524,
+  "handoff_before_snapshot_seconds": 240.02684571710415,
+  "note": "Stage wall sum excludes manual handoff, development, review and post-run diagnosis. Per-item queue/service sums are not wall time. Initial graph receipt preserved; recovery metadata must not replace benchmark."
+}

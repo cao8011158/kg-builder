@@ -1,0 +1,3 @@
+{"before": {"vm": 341, "rows": 1, "output_bytes": 511}, "after_1000done_1000futureleased": {"vm": 370, "rows": 1, "output_bytes": 510}}
+queued [(7, 0, 61, 'SEARCH t USING INDEX idx_tasks_queued (kind=?)'), (14, 0, 46, 'SEARCH p USING INDEX sqlite_autoindex_papers_1 (paper_id=?)')]
+leased [(7, 0, 49, 'SEARCH t USING INDEX idx_tasks_claim (kind=? AND state=? AND lease_until<?)'), (17, 0, 46, 'SEARCH p USING INDEX sqlite_autoindex_papers_1 (paper_id=?)'), (36, 0, 0, 'USE TEMP B-TREE FOR ORDER BY')]

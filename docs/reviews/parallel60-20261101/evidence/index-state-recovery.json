@@ -1,0 +1,92 @@
+{
+  "observation": "First runner receipt reported verified index; after closing, physical graph DB lacked index/completion metadata. Exact cause unconfirmed after isolated/cold/concurrent-CLI probes.",
+  "initial_receipt": {
+    "completed_at": 1793539530.630935,
+    "wall_seconds": 851.8790396010008,
+    "index_status": "verified",
+    "index_stage_seconds": 2.76139842900011
+  },
+  "before_meta": {
+    "snapshot_hash": "65015c638bb028e74139e248abdfbb391fb8875f3beddb0d5fc47229c4700b41",
+    "file_hash": "d458410bddb62902de2bd911c28e5953433b82f8bb3b1ce9a7babe0a9c511b3d",
+    "snapshot_stat": "3317750:1793538678341773670",
+    "phase": "complete",
+    "started_at": "1793538678.9424286",
+    "k": "20",
+    "name_mode": "external",
+    "model_id": "fastembed-0.9.1:BAAI/bge-small-en-v1.5:research-problem-text-v1:l2-v1",
+    "review_result": "{\"status\": \"imported\", \"review_id\": \"snapshot:65015c638bb028e74139e248abdfbb391fb8875f3beddb0d5fc47229c4700b41\", \"entities\": 142, \"assignments\": 144, \"index_status\": \"current\"}"
+  },
+  "offline_recovery_elapsed_seconds": 0.09178075499949045,
+  "after_meta": {
+    "snapshot_hash": "65015c638bb028e74139e248abdfbb391fb8875f3beddb0d5fc47229c4700b41",
+    "file_hash": "d458410bddb62902de2bd911c28e5953433b82f8bb3b1ce9a7babe0a9c511b3d",
+    "snapshot_stat": "3317750:1793538678341773670",
+    "phase": "complete",
+    "started_at": "1793538678.9424286",
+    "k": "20",
+    "name_mode": "external",
+    "model_id": "fastembed-0.9.1:BAAI/bge-small-en-v1.5:research-problem-text-v1:l2-v1",
+    "review_result": "{\"status\": \"imported\", \"review_id\": \"snapshot:65015c638bb028e74139e248abdfbb391fb8875f3beddb0d5fc47229c4700b41\", \"entities\": 142, \"assignments\": 144, \"index_status\": \"current\"}",
+    "index_status": "verified",
+    "index_model_id": "fastembed-0.9.1:BAAI/bge-small-en-v1.5:research-problem-text-v1:l2-v1",
+    "index_builds": "4",
+    "index_cache_hits": "259",
+    "index_embeddings_computed": "0",
+    "completed_at": "1793540243.744334"
+  },
+  "reopened_verified": true,
+  "jev_requests_before": 227,
+  "jev_requests_after": 227,
+  "new_api_calls": 0,
+  "status_after": {
+    "phase": "complete",
+    "snapshot_hash": "65015c638bb028e74139e248abdfbb391fb8875f3beddb0d5fc47229c4700b41",
+    "candidate_pairs": {
+      "different": 3123,
+      "pending": 55,
+      "same": 27
+    },
+    "groups": {
+      "accepted": 142,
+      "pending": 64
+    },
+    "name_tasks": {
+      "done": 30
+    },
+    "mentions": {
+      "new_entity": 144,
+      "pending": 85
+    },
+    "stage_seconds": {
+      "snapshot_import_cpu": 0.5883843779993185,
+      "candidate_graph_cpu": 0.143591876996652,
+      "jev_api_request_seconds": 2105.266669169978,
+      "jev_api_elapsed_seconds": 2105.3707159109836,
+      "jev_retry_count": 0.0,
+      "jev_pair_wall": 594.8594362580006,
+      "jev_group_wall": 27.501665430001594,
+      "materialize_cpu": 0.06861811698763631,
+      "name_queued_wait": 5881.186589956284,
+      "name_external_service": 342.83551263809204,
+      "jev_final_name_wall": 8.64636192800026,
+      "retrieval_index_cpu": 0.08440896400134079
+    },
+    "pending_pairs": 55,
+    "pending_groups": 64,
+    "pending_mentions": 85,
+    "started_at": 1793538678.9424286,
+    "completed_at": 1793540243.744334,
+    "elapsed_wall_seconds": 1564.8019053936005,
+    "jev_request_count": 227,
+    "jev_request_peak_concurrency": 4,
+    "jev_request_wall_union_seconds": 629.6626267433167,
+    "jev_logical_request_intervals": 227,
+    "jev_http_attempt_intervals": 227,
+    "jev_client_concurrency": null,
+    "index_status": "verified",
+    "index_builds": 4,
+    "index_cache_hits": 259,
+    "index_embeddings_computed": 0
+  }
+}
