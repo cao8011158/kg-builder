@@ -1,0 +1,12 @@
+test_batches_bounded (test_decision_api.DecisionTests.test_batches_bounded) ... ok
+test_long_field_review_splits_questions (test_decision_api.DecisionTests.test_long_field_review_splits_questions) ... ok
+test_native_request_and_audit (test_decision_api.DecisionTests.test_native_request_and_audit) ... ok
+test_reject_malformed_answers (test_decision_api.DecisionTests.test_reject_malformed_answers) ... ok
+test_scope_and_reviews (test_decision_api.DecisionTests.test_scope_and_reviews) ... ok
+test_pins_and_generic_json (test_extraction_api.ExtractionAPITests.test_pins_and_generic_json) ... ok
+test_requires_pins_and_disabled (test_extraction_api.ExtractionAPITests.test_requires_pins_and_disabled) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.008s
+
+OK
