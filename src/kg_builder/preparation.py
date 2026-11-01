@@ -10,6 +10,7 @@ import secrets
 import sqlite3
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 from .collectors import openalex_search, arxiv_search
 from .storage import connect as source_connect, upsert_paper, ingest_extraction
@@ -17,29 +18,51 @@ from .extraction_validation import RETRIEVAL_SCHEMA_VERSION, validate_extraction
 
 QUERIES = ('agent long term memory', 'agent context compression', 'agent skill learning evolution')
 TOPICS = ('agent_memory', 'context_management', 'skill_evolution')
+ITEM_FIELDS = ('contributions','research_problems','methods','benchmarks')
 CANON = lambda x: json.dumps(x, sort_keys=True, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
 SHA = lambda x: hashlib.sha256(CANON(x).encode()).hexdigest()
 
 def snapshot_digest(snapshot):
     return SHA({k:v for k,v in snapshot.items() if k!='snapshot_hash'})
 
+def _failure_audits(exc, client):
+    audits=getattr(exc,'request_audits',None)
+    if audits is not None:return audits
+    audit=getattr(exc,'request_audit',None) or getattr(client,'last_request_audit',None)
+    return [audit] if audit else []
+
 class PreparationWorkflow:
     def __init__(self, run_dir, *, target=60, llm_mode='external', jev_model='jev-1.14.0',
                  batch_size=5, per_query=100, since='2025-01-01', until=None,
                  lease_seconds=1800, repair_limit=2, min_confidence=.7,
+                 review_policy='item-v1', item_max_reviews=2, jev_concurrency=4,
+                 generation_concurrency=3, scope_workers=2, review_workers=2,
                  client=None, extractor=None, scope_fn=None, review_fn=None,
                  collectors=None, embedding=None):
+        if review_policy not in ('item-v1','legacy-paper') or item_max_reviews<1:
+            raise ValueError('Invalid review policy or item review budget')
+        if min(jev_concurrency,generation_concurrency,scope_workers,review_workers)<1:
+            raise ValueError('Concurrency budgets must be positive')
         self.run_dir=Path(run_dir)
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.path=self.run_dir/'workflow.sqlite3'
         self.master=self.run_dir/'master.sqlite3'
         self.config=dict(target=target,llm_mode=llm_mode,jev_model=jev_model,batch_size=batch_size,
                          per_query=per_query,since=since,until=until or datetime.now(timezone.utc).date().isoformat(),
-                         lease_seconds=lease_seconds,repair_limit=repair_limit,min_confidence=min_confidence)
+                         lease_seconds=lease_seconds,repair_limit=repair_limit,min_confidence=min_confidence,
+                         review_policy=review_policy,item_max_reviews=item_max_reviews,
+                         jev_concurrency=jev_concurrency,generation_concurrency=generation_concurrency,
+                         scope_workers=scope_workers,review_workers=review_workers)
         self.client=client; self.extractor=extractor; self.scope_fn=scope_fn; self.review_fn=review_fn
         self.collectors=collectors or {'openalex':openalex_search,'arxiv':arxiv_search}
         self.embedding=embedding
         self._init()
+        if self.client is None:
+            from .decision_api import JevClient
+            self.client=JevClient(model=self.config['jev_model'],max_concurrency=self.config.get('jev_concurrency',4))
+
+    @property
+    def item_policy(self):return self.config.get('review_policy','legacy-paper')=='item-v1'
 
     def _db(self):
         db=sqlite3.connect(self.path,timeout=30)
@@ -53,13 +76,13 @@ class PreparationWorkflow:
         db.executescript('''
           CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY CHECK(id=1), run_id TEXT NOT NULL,
             config_json TEXT NOT NULL, collection_state TEXT NOT NULL, started REAL NOT NULL,
-            completed REAL, error TEXT);
+            completed REAL, error TEXT,jev_stats_json TEXT);
           CREATE TABLE IF NOT EXISTS papers (paper_id TEXT PRIMARY KEY,version_id TEXT NOT NULL,
             title TEXT NOT NULL,text TEXT NOT NULL,version_label TEXT,source_url TEXT NOT NULL,
             fingerprint TEXT NOT NULL,origin_source TEXT NOT NULL,origin_id TEXT NOT NULL,scope_state TEXT NOT NULL DEFAULT 'queued',
             scope_json TEXT, review_state TEXT NOT NULL DEFAULT 'none',review_json TEXT,
             extraction_json TEXT, reason TEXT, attempts INTEGER NOT NULL DEFAULT 0,
-            discovered REAL NOT NULL, scope_started REAL, scoped REAL, reviewed REAL);
+            discovered REAL NOT NULL, scope_started REAL, scoped REAL, reviewed REAL,review_started REAL);
           CREATE INDEX IF NOT EXISTS idx_papers_scope ON papers(scope_state,discovered);
           CREATE INDEX IF NOT EXISTS idx_papers_review ON papers(review_state,discovered);
           CREATE TABLE IF NOT EXISTS tasks (task_id TEXT PRIMARY KEY,paper_id TEXT NOT NULL REFERENCES papers(paper_id),
@@ -76,6 +99,11 @@ class PreparationWorkflow:
             paper_id TEXT NOT NULL,stage TEXT NOT NULL,attempt INTEGER NOT NULL,
             payload_json TEXT NOT NULL,created REAL NOT NULL);
           CREATE INDEX IF NOT EXISTS idx_decision_audit_paper ON decision_audits(paper_id,stage,attempt);
+          CREATE TABLE IF NOT EXISTS item_reviews (paper_id TEXT NOT NULL,field TEXT NOT NULL,
+            item_key TEXT NOT NULL,fingerprint TEXT NOT NULL,input_hash TEXT NOT NULL,
+            state TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,payload_json TEXT NOT NULL,
+            approved_json TEXT,issues_json TEXT NOT NULL DEFAULT '[]',PRIMARY KEY(paper_id,field,item_key));
+          CREATE INDEX IF NOT EXISTS idx_item_reviews_state ON item_reviews(paper_id,state);
           CREATE TABLE IF NOT EXISTS candidates (source TEXT NOT NULL,topic TEXT NOT NULL,
             query TEXT NOT NULL,position INTEGER NOT NULL,payload_json TEXT NOT NULL,
             PRIMARY KEY(source,topic,query,position));
@@ -86,6 +114,10 @@ class PreparationWorkflow:
             query TEXT NOT NULL, state TEXT NOT NULL,error TEXT, received INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY(source,topic,query));
         ''')
+        if 'review_started' not in {r[1] for r in db.execute('PRAGMA table_info(papers)')}:
+            db.execute('ALTER TABLE papers ADD COLUMN review_started REAL')
+        if 'jev_stats_json' not in {r[1] for r in db.execute('PRAGMA table_info(run)')}:
+            db.execute('ALTER TABLE run ADD COLUMN jev_stats_json TEXT')
         row=db.execute('SELECT config_json FROM run WHERE id=1').fetchone()
         if row:
             old=json.loads(row[0])
@@ -93,7 +125,8 @@ class PreparationWorkflow:
                 # A caller can reopen without reproducing defaults; run configuration remains authoritative.
                 self.config=old
         else:
-            db.execute('INSERT INTO run VALUES(1,?,?,?,?,?,?)',(uuid.uuid4().hex,CANON(self.config),'open',time.time(),None,None))
+            db.execute('''INSERT INTO run(id,run_id,config_json,collection_state,started,completed,error)
+                VALUES(1,?,?,?,?,?,?)''',(uuid.uuid4().hex,CANON(self.config),'open',time.time(),None,None))
         db.commit();db.close()
         source_connect(self.master).close()
 
@@ -109,8 +142,11 @@ class PreparationWorkflow:
         row['topic_basis']='discovery_query_candidate'
         con=source_connect(self.master)
         try:
+            con.execute('BEGIN IMMEDIATE')
             pid,vid=upsert_paper(con,row,source,sid,query)
+            con.execute('BEGIN IMMEDIATE')
             ver=con.execute('SELECT version_label,source_url FROM paper_versions WHERE version_id=?',(vid,)).fetchone()
+            con.commit()
         finally: con.close()
         title=row.get('title') or pid; abstract=row.get('abstract') or ''
         url=ver[1] or row.get('url')
@@ -127,6 +163,7 @@ class PreparationWorkflow:
                         (pid,vid,title,abstract,ver[0],url,fingerprint,source,sid,time.time()))
                 elif prior[0]!=fingerprint and (prior[1],prior[2])==(source,sid):
                     db.execute("UPDATE papers SET scope_state='pending',review_state='pending',reason='source_changed' WHERE paper_id=?",(pid,))
+                    db.execute("UPDATE item_reviews SET state='revoked',approved_json=NULL WHERE paper_id=?",(pid,))
                     db.execute("UPDATE tasks SET state='failed',reason='source_changed',lease_token=NULL WHERE paper_id=? AND state IN ('queued','leased')",(pid,))
             return pid
         finally:db.close()
@@ -206,8 +243,9 @@ class PreparationWorkflow:
         fn=self.scope_fn or classify_scope
         db=self._db(); now=time.time()
         with db:
+            db.execute('BEGIN IMMEDIATE')
             rows=db.execute("SELECT * FROM papers WHERE scope_state='queued' ORDER BY discovered LIMIT ?",(self.config['batch_size'],)).fetchall()
-            for r in rows:db.execute("UPDATE papers SET scope_state='processing',scope_started=? WHERE paper_id=? AND scope_state='queued'",(now,r['paper_id']))
+            rows=[r for r in rows if db.execute("UPDATE papers SET scope_state='processing',scope_started=? WHERE paper_id=? AND scope_state='queued'",(now,r['paper_id'])).rowcount]
         db.close()
         if not rows:return 0
         items=[dict(paper_id=r['paper_id'],title=r['title'],text=r['text']) for r in rows if r['text'] and r['source_url']]
@@ -220,23 +258,25 @@ class PreparationWorkflow:
                 # Transient API failure leaves the items restartable.
                 db=self._db()
                 with db:
-                    for r in rows:db.execute("UPDATE papers SET scope_state='queued' WHERE paper_id=? AND scope_state='processing'",(r['paper_id'],))
+                    for r in rows:db.execute("UPDATE papers SET scope_state='queued' WHERE paper_id=? AND scope_state='processing' AND scope_started=?",(r['paper_id'],now))
                     db.execute('UPDATE run SET error=? WHERE id=1',(type(exc).__name__,))
-                    audit=getattr(locals().get('client'),'last_request_audit',None)
-                    if audit:
+                    audits=_failure_audits(exc,locals().get('client'))
+                    if audits:
                         for r in rows:db.execute('INSERT INTO decision_audits(paper_id,stage,attempt,payload_json,created) VALUES(?,?,?,?,?)',
-                            (r['paper_id'],'scope_error',0,CANON(dict(error=type(exc).__name__,request=audit)),time.time()))
+                            (r['paper_id'],'scope_error',0,CANON(dict(error=type(exc).__name__,requests=audits)),time.time()))
                 db.close();raise
         now2=time.time();db=self._db()
         with db:
             for r in rows:
+                current=db.execute('SELECT scope_state,scope_started FROM papers WHERE paper_id=?',(r['paper_id'],)).fetchone()
+                if current['scope_state']!='processing' or current['scope_started']!=now:continue
                 o=outcomes.get(r['paper_id'])
                 decision=o['decision'] if o else 'pending'
                 if decision not in ('include','exclude','pending'):decision='pending'
                 db.execute('''UPDATE papers SET scope_state=?,scope_json=?,scoped=?,reason=?
-                    WHERE paper_id=? AND scope_state='processing' ''',
+                    WHERE paper_id=? AND scope_state='processing' AND scope_started=? ''',
                     (decision,CANON(o) if o else None,now2,
-                     'missing_source_content' if not o else o.get('reason'),r['paper_id']))
+                     'missing_source_content' if not o else o.get('reason'),r['paper_id'],now))
                 if o:db.execute('INSERT INTO decision_audits(paper_id,stage,attempt,payload_json,created) VALUES(?,?,?,?,?)',
                     (r['paper_id'],'scope',0,CANON(o),now2))
                 if decision=='include':self._queue_task(db,r['paper_id'],'extract',r['fingerprint'],0)
@@ -296,6 +336,10 @@ class PreparationWorkflow:
                         if kind=='repair_extraction':
                             out[-1]['previous_extraction']=json.loads(r['extraction_json']) if r['extraction_json'] else None
                             out[-1]['review_issues']=json.loads(r['review_json']).get('issues',[]) if r['review_json'] else []
+                            if self.item_policy:
+                                failed=db.execute("SELECT field,item_key,payload_json,issues_json FROM item_reviews WHERE paper_id=? AND state='repair_queued' ORDER BY field,item_key",(r['paper_id'],)).fetchall()
+                                out[-1]['requested_items']=[dict(field=x['field'],key=x['item_key'],previous_item=json.loads(x['payload_json']),issues=json.loads(x['issues_json'])) for x in failed]
+                                out[-1]['review_issues']=[dict(field=x['field'],key=x['item_key'],issues=json.loads(x['issues_json'])) for x in failed]
                         self._metric(db,'extract_queue',queued=now-r['created'])
         finally:db.close()
         return out
@@ -310,6 +354,7 @@ class PreparationWorkflow:
         db=self._db();now=time.time()
         try:
             with db:
+                db.execute('BEGIN IMMEDIATE')
                 r=db.execute('''SELECT t.*,p.version_id,p.version_label,p.source_url,p.fingerprint AS current_hash,
                     p.scope_state,p.title,p.text FROM tasks t JOIN papers p ON p.paper_id=t.paper_id
                     WHERE t.task_id=?''',(e['task_id'],)).fetchone()
@@ -331,21 +376,46 @@ class PreparationWorkflow:
                 if draft.get('schema_version')!=RETRIEVAL_SCHEMA_VERSION:raise ValueError('Expected v0.3 extraction')
                 if draft.get('status')!='draft_requires_review':raise ValueError('Expected unreviewed draft status')
                 validate_extraction(draft)
+                if self.item_policy and r['kind']=='repair_extraction':
+                    prior=db.execute("SELECT field,item_key,state,approved_json FROM item_reviews WHERE paper_id=? AND state IN ('approved','repair_queued')",(r['paper_id'],)).fetchall()
+                    expected={(x['field'],x['item_key']):x for x in prior}
+                    supplied={(field,item['key']):item for field in ITEM_FIELDS for item in draft[field]}
+                    if not any(x['state']=='repair_queued' for x in prior):raise ValueError('No requested repair items')
+                    if set(supplied)-set(expected):raise ValueError('Repair introduced an item key')
+                    if any((x['field'],x['item_key']) not in supplied for x in prior if x['state']=='repair_queued'):
+                        raise ValueError('Repair omitted a requested item')
+                    if any(CANON(supplied[(x['field'],x['item_key'])])!=x['approved_json'] for x in prior
+                           if x['state']=='approved' and (x['field'],x['item_key']) in supplied):
+                        raise ValueError('Repair changed an approved item')
                 db.execute("UPDATE tasks SET state='done',result_hash=?,result_json=?,finished=? WHERE task_id=?",
                            (h,CANON(draft),now,e['task_id']))
                 db.execute("UPDATE papers SET review_state='queued',extraction_json=? WHERE paper_id=?",
                            (CANON(draft),r['paper_id']))
+                if self.item_policy:
+                    if r['kind']=='extract':
+                        for field in ITEM_FIELDS:
+                            for item in draft[field]:
+                                db.execute('''INSERT INTO item_reviews(paper_id,field,item_key,fingerprint,input_hash,state,payload_json)
+                                    VALUES(?,?,?,?,?,'queued',?)''',(r['paper_id'],field,item['key'],r['fingerprint'],SHA(item),CANON(item)))
+                    else:
+                        for field in ITEM_FIELDS:
+                            for item in draft[field]:
+                                db.execute('''UPDATE item_reviews SET input_hash=?,state='queued',payload_json=?
+                                  WHERE paper_id=? AND field=? AND item_key=? AND state='repair_queued' ''',
+                                  (SHA(item),CANON(item),r['paper_id'],field,item['key']))
                 self._metric(db,'external_extraction',service=now-r['claimed'])
                 return dict(task_id=e['task_id'],status='accepted')
         finally:db.close()
 
     def _review_batch(self):
+        if self.item_policy:return self._review_item_batch()
         from .decision_api import JevClient, review_extractions
         fn=self.review_fn or review_extractions
         db=self._db()
         with db:
+            db.execute('BEGIN IMMEDIATE')
             rows=db.execute("SELECT * FROM papers WHERE review_state='queued' AND scope_state='include' ORDER BY discovered LIMIT ?",(self.config['batch_size'],)).fetchall()
-            for r in rows:db.execute("UPDATE papers SET review_state='processing' WHERE paper_id=? AND review_state='queued'",(r['paper_id'],))
+            for r in rows:db.execute("UPDATE papers SET review_state='processing',review_started=? WHERE paper_id=? AND review_state='queued'",(time.time(),r['paper_id']))
         db.close()
         if not rows:return 0
         start=time.time()
@@ -357,10 +427,10 @@ class PreparationWorkflow:
             with db:
                 for r in rows:db.execute("UPDATE papers SET review_state='queued' WHERE paper_id=? AND review_state='processing'",(r['paper_id'],))
                 db.execute('UPDATE run SET error=? WHERE id=1',(type(exc).__name__,))
-                audit=getattr(locals().get('client'),'last_request_audit',None)
-                if audit:
+                audits=_failure_audits(exc,locals().get('client'))
+                if audits:
                     for r in rows:db.execute('INSERT INTO decision_audits(paper_id,stage,attempt,payload_json,created) VALUES(?,?,?,?,?)',
-                        (r['paper_id'],'field_review_error',r['attempts']+1,CANON(dict(error=type(exc).__name__,request=audit)),time.time()))
+                        (r['paper_id'],'field_review_error',r['attempts']+1,CANON(dict(error=type(exc).__name__,requests=audits)),time.time()))
             db.close();raise
         db=self._db(); now=time.time()
         with db:
@@ -394,11 +464,107 @@ class PreparationWorkflow:
             db.execute("UPDATE run SET error=NULL WHERE id=1 AND error NOT LIKE 'collection_shortfall:%'")
         db.close();return len(rows)
 
+    def _review_item_batch(self):
+        from .decision_api import review_items
+        db=self._db();start=time.time()
+        with db:
+            db.execute('BEGIN IMMEDIATE')
+            rows=db.execute("SELECT * FROM papers WHERE review_state='queued' AND scope_state='include' ORDER BY discovered LIMIT ?",(self.config['batch_size'],)).fetchall()
+            rows=[r for r in rows if db.execute("UPDATE papers SET review_state='processing',review_started=? WHERE paper_id=? AND review_state='queued'",(start,r['paper_id'])).rowcount]
+            work={r['paper_id']:db.execute("SELECT * FROM item_reviews WHERE paper_id=? AND state='queued' ORDER BY field,item_key",(r['paper_id'],)).fetchall() for r in rows}
+        db.close()
+        if not rows:return 0
+        inputs=[dict(paper_id=r['paper_id'],field=x['field'],key=x['item_key'],text=r['text'],
+                     item=json.loads(x['payload_json']),input_hash=x['input_hash']) for r in rows for x in work[r['paper_id']]]
+        expected_keys={(i['paper_id'],i['field'],i['key']) for i in inputs}
+        try:
+            outcomes=(self.review_fn or review_items)(inputs,self.client,min_confidence=self.config['min_confidence']) if inputs else []
+            keyed={}
+            for o in outcomes:
+                k=(o['paper_id'],o['field'],o['key'])
+                if k in keyed or k not in expected_keys:
+                    raise ValueError('Duplicate or unknown review item key')
+                keyed[k]=o
+            if len(keyed)!=len(inputs) or any(keyed[(i['paper_id'],i['field'],i['key'])].get('input_hash')!=i['input_hash'] for i in inputs):
+                raise ValueError('Missing item review or wrong review input hash')
+        except Exception as exc:
+            db=self._db()
+            with db:
+                for r in rows:db.execute("UPDATE papers SET review_state='queued' WHERE paper_id=? AND review_state='processing'",(r['paper_id'],))
+                db.execute('UPDATE run SET error=? WHERE id=1',(type(exc).__name__,))
+                audits=_failure_audits(exc,self.client)
+                if audits:
+                    for r in rows:db.execute('INSERT INTO decision_audits(paper_id,stage,attempt,payload_json,created) VALUES(?,?,?,?,?)',
+                        (r['paper_id'],'item_review_error',0,CANON(dict(error=type(exc).__name__,requests=audits)),time.time()))
+            db.close();raise
+        diagnostics={}
+        if self.review_fn is None:
+            from .decision_api import review_completeness
+            fresh=[dict(paper_id=r['paper_id'],text=r['text'],extraction=json.loads(r['extraction_json'])) for r in rows if not r['attempts']]
+            if fresh:
+                try:diagnostics={o['paper_id']:o for o in review_completeness(fresh,self.client,min_confidence=self.config['min_confidence'])}
+                except Exception as exc:
+                    diagnostics={x['paper_id']:dict(completeness={field:dict(passed=None,error=type(exc).__name__) for field in ITEM_FIELDS},
+                        error=type(exc).__name__,requests=_failure_audits(exc,self.client)) for x in fresh}
+        db=self._db();now=time.time()
+        with db:
+            for r in rows:
+                current=db.execute('SELECT review_state,review_started FROM papers WHERE paper_id=?',(r['paper_id'],)).fetchone()
+                if current['review_state']!='processing' or current['review_started']!=start:continue
+                for x in work[r['paper_id']]:
+                    o=keyed[(r['paper_id'],x['field'],x['item_key'])]
+                    attempts=x['attempts']+1
+                    state='approved' if o.get('passed') and float(o.get('confidence',0))>=self.config['min_confidence'] else ('repair_queued' if attempts<self.config['item_max_reviews'] else 'dropped')
+                    db.execute('''UPDATE item_reviews SET state=?,attempts=?,issues_json=?,approved_json=?
+                      WHERE paper_id=? AND field=? AND item_key=? AND input_hash=? AND state='queued' ''',
+                      (state,attempts,CANON(o.get('issues',[])),x['payload_json'] if state=='approved' else None,
+                       r['paper_id'],x['field'],x['item_key'],x['input_hash']))
+                    db.execute('INSERT INTO decision_audits(paper_id,stage,attempt,payload_json,created) VALUES(?,?,?,?,?)',
+                        (r['paper_id'],'item_review',attempts,CANON(o),now))
+                items=db.execute('SELECT * FROM item_reviews WHERE paper_id=? ORDER BY field,item_key',(r['paper_id'],)).fetchall()
+                repair=any(x['state']=='repair_queued' for x in items)
+                approved=any(x['state']=='approved' for x in items)
+                state='repair_queued' if repair else ('ready' if approved else 'no_usable_items')
+                raw=json.loads(r['extraction_json'])
+                previous=json.loads(r['review_json']) if r['review_json'] else {}
+                completeness=diagnostics.get(r['paper_id'],{}).get('completeness') or previous.get('completeness') or {field:dict(passed=None,diagnostic_only=True) for field in ITEM_FIELDS}
+                review=dict(policy='item-v1',items=[dict(field=x['field'],key=x['item_key'],state=x['state'],attempts=x['attempts'],input_hash=x['input_hash'],approved_payload_hash=SHA(json.loads(x['approved_json'])) if x['approved_json'] else None,issues=json.loads(x['issues_json'])) for x in items],completeness=completeness)
+                if r['paper_id'] in diagnostics:
+                    db.execute('INSERT INTO decision_audits(paper_id,stage,attempt,payload_json,created) VALUES(?,?,?,?,?)',
+                        (r['paper_id'],'completeness',1,CANON(diagnostics[r['paper_id']]),now))
+                source_task=db.execute("SELECT task_id,result_hash FROM tasks WHERE paper_id=? AND kind='extract' AND state='done' ORDER BY attempt LIMIT 1",(r['paper_id'],)).fetchone()
+                review['derivation']=dict(source_task_id=source_task['task_id'],source_draft_hash=source_task['result_hash']) if source_task else None
+                if state=='ready':
+                    payload={**raw,'status':'reviewed','extractor_type':'item_reviewed_derivative',
+                             'extractor_version':raw['extractor_version']+':item-v1:'+SHA(raw)[:12]}
+                    for field in ITEM_FIELDS:payload[field]=[json.loads(x['approved_json']) for x in items if x['field']==field and x['state']=='approved']
+                    # Release workflow's write lock before taking the source writer lock.
+                    db.commit()
+                    con=source_connect(self.master)
+                    try:
+                        con.execute('BEGIN IMMEDIATE')
+                        ver=con.execute('SELECT source_url,abstract,version_label FROM paper_versions WHERE version_id=?',(r['version_id'],)).fetchone()
+                        if not ver or tuple(ver)!=(r['source_url'],r['text'],r['version_label']):
+                            state='pending';review['source_changed']=True
+                        else:
+                            ingest_extraction(con,payload);con.commit()
+                    finally:con.close()
+                    if state=='ready':raw=payload
+                    else:db.execute("UPDATE item_reviews SET state='revoked',approved_json=NULL WHERE paper_id=?",(r['paper_id'],))
+                db.execute('''UPDATE papers SET review_state=?,review_json=?,extraction_json=?,attempts=attempts+1,reviewed=?,reason=?
+                    WHERE paper_id=? AND review_state='processing' ''',
+                    (state,CANON(review),CANON(raw),now,'no_usable_items' if state=='no_usable_items' else None,r['paper_id']))
+                if state=='repair_queued':self._queue_task(db,r['paper_id'],'repair_extraction',r['fingerprint'],r['attempts']+1)
+                self._metric(db,'item_review',active=(now-start)/len(rows))
+            db.execute("UPDATE run SET error=NULL WHERE id=1 AND error NOT LIKE 'collection_shortfall:%'")
+        db.close();return len(rows)
+
     def status(self):
         db=self._db()
         try:
             run=dict(db.execute('SELECT * FROM run WHERE id=1').fetchone())
             return dict(run_id=run['run_id'],collection_state=run['collection_state'],config=json.loads(run['config_json']),
+               jev_concurrency=json.loads(run['jev_stats_json']) if run['jev_stats_json'] else getattr(self.client,'concurrency_stats',None),
                papers={r[0]:r[1] for r in db.execute('SELECT scope_state,count(*) FROM papers GROUP BY scope_state')},
                review={r[0]:r[1] for r in db.execute('SELECT review_state,count(*) FROM papers GROUP BY review_state')},
                tasks={r[0]+'/'+r[1]:r[2] for r in db.execute('SELECT kind,state,count(*) FROM tasks GROUP BY kind,state')},
@@ -409,31 +575,54 @@ class PreparationWorkflow:
 
     async def run(self, *, poll_seconds=1, collect=True, stop_event=None):
         db=self._db()
-        with db:db.execute("UPDATE papers SET scope_state='queued' WHERE scope_state='processing'")
-        with db:db.execute("UPDATE papers SET review_state='queued' WHERE review_state='processing'")
+        # Only startup recovery resets interrupted claims; concurrent workers never reset them.
+        cutoff=time.time()-self.config['lease_seconds']
+        with db:db.execute("UPDATE papers SET scope_state='queued' WHERE scope_state='processing' AND (scope_started IS NULL OR scope_started<?)",(cutoff,))
+        with db:db.execute("UPDATE papers SET review_state='queued' WHERE review_state='processing' AND (review_started IS NULL OR review_started<?)",(cutoff,))
         sealed=db.execute('SELECT collection_state FROM run WHERE id=1').fetchone()[0]=='sealed'
         db.close()
         producer=asyncio.create_task(self.collect()) if collect and not sealed else None
         state='sealed' if sealed else 'open';outstanding=1
+        pool=ThreadPoolExecutor(max_workers=self.config.get('scope_workers',2)+self.config.get('review_workers',2)+self.config.get('generation_concurrency',3))
+        workers=[]
+        def launch(fn,count):
+            while sum(1 for f,kind in workers if kind==fn and not f.done())<count:
+                workers.append((asyncio.get_running_loop().run_in_executor(pool,fn),fn))
         try:
             while True:
                 if stop_event and stop_event.is_set():break
-                n=await asyncio.to_thread(self._scope_batch)
-                n+=await asyncio.to_thread(self._review_batch)
-                if self.config['llm_mode']=='api':
-                    n+=await asyncio.to_thread(self._api_extract)
+                completed=[f for f,_ in workers if f.done()]
+                for f in completed:f.result()
+                workers=[pair for pair in workers if not pair[0].done()]
                 db=self._db()
+                cutoff=time.time()-self.config['lease_seconds']
+                with db:
+                    db.execute("UPDATE papers SET scope_state='queued' WHERE scope_state='processing' AND scope_started<?",(cutoff,))
+                    db.execute("UPDATE papers SET review_state='queued' WHERE review_state='processing' AND review_started<?",(cutoff,))
                 state=db.execute('SELECT collection_state FROM run WHERE id=1').fetchone()[0]
                 outstanding=db.execute("SELECT (SELECT count(*) FROM papers WHERE scope_state IN ('queued','processing') OR review_state IN ('queued','processing','repair_queued'))+(SELECT count(*) FROM tasks WHERE state IN ('queued','leased'))").fetchone()[0]
                 db.close()
-                if state=='sealed' and outstanding==0:break
-                if not n:await asyncio.sleep(poll_seconds)
+                if state=='sealed' and outstanding==0:
+                    if not workers:break
+                    await asyncio.sleep(poll_seconds)
+                    continue
+                launch(self._scope_batch,self.config.get('scope_workers',2))
+                launch(self._review_batch,self.config.get('review_workers',2))
+                if self.config['llm_mode']=='api':
+                    launch(self._api_extract,self.config.get('generation_concurrency',3))
+                await asyncio.sleep(poll_seconds)
             db=self._db()
             with db:
                 if state=='sealed' and outstanding==0:
                     db.execute('UPDATE run SET completed=COALESCE(completed,?) WHERE id=1',(time.time(),))
+                    stats=getattr(self.client,'concurrency_stats',None)
+                    if stats and stats.get('started',0):
+                        db.execute('UPDATE run SET jev_stats_json=COALESCE(jev_stats_json,?) WHERE id=1',(CANON(stats),))
             db.close()
         finally:
+            for f,_ in workers:
+                if not f.done():f.cancel()
+            pool.shutdown(wait=True,cancel_futures=True)
             if producer:
                 if not producer.done():producer.cancel()
                 try:await producer
@@ -447,10 +636,13 @@ class PreparationWorkflow:
             for task in self.claim(kind,self.config['batch_size'],'api'):
                 if kind=='repair_extraction':
                     from .extraction_api import EXTRACTION_INSTRUCTIONS
-                    result=self.extractor.generate_json(EXTRACTION_INSTRUCTIONS+' Repair the previous extraction using review issues; return complete v0.3 object with original metadata pins.',
+                    instruction=(EXTRACTION_INSTRUCTIONS+' Repair only requested failed item keys using review issues; return a complete v0.3 object with original metadata pins. Do not add keys or modify frozen approved items.'
+                                 if self.item_policy else EXTRACTION_INSTRUCTIONS+' Repair the previous extraction using review issues; return complete v0.3 object with original metadata pins.')
+                    result=self.extractor.generate_json(instruction,
                         {'paper_id':task['paper_id'],'version_id':task['version_id'],
                          'paper_version':task['paper_version'],'paper_text':task['text'],
-                         'previous_extraction':task['previous_extraction'],'review_issues':task['review_issues']},
+                         'previous_extraction':task['previous_extraction'],'review_issues':task['review_issues'],
+                         'requested_items':task.get('requested_items')},
                         required_keys=('schema_version','paper_id','version_id','paper_version'))
                     result['status']='draft_requires_review'
                     result['extractor_type']='llm_api_unreviewed'
@@ -501,10 +693,14 @@ class PreparationWorkflow:
         with db:self._metric(db,'snapshot_embedding',active=embed_elapsed)
         result=dict(schema_version='research-kg-prepared-snapshot/1',run_id=run['run_id'],
             counts=dict(collected=len(rows),ready=len(ready),excluded=sum(r['scope_state']=='exclude' for r in rows),
-                        pending=sum(r['scope_state']=='pending' or r['review_state']=='pending' for r in rows)),
+                        pending=sum(r['scope_state']=='pending' or r['review_state']=='pending' for r in rows),
+                        no_usable_items=sum(r['review_state']=='no_usable_items' for r in rows)),
             config=json.loads(run['config_json']),papers=papers,extractions=extractions,vectors=vectors,
             excluded=[dict(paper_id=r['paper_id'],reason=r['reason'],scope=json.loads(r['scope_json']) if r['scope_json'] else None) for r in rows if r['scope_state']=='exclude'],
             pending=[dict(paper_id=r['paper_id'],reason=r['reason'],scope_state=r['scope_state'],review_state=r['review_state']) for r in rows if r['scope_state']=='pending' or r['review_state']=='pending'])
+        if self.item_policy:
+            result['review_metadata']={r['paper_id']:json.loads(r['review_json']) for r in rows if r['review_json'] and r['review_state'] in ('ready','no_usable_items')}
+            result['no_usable_items']=[dict(paper_id=r['paper_id'],review=json.loads(r['review_json'])) for r in rows if r['review_state']=='no_usable_items']
         result['snapshot_hash']=snapshot_digest(result)
         db.close()
         path=Path(output);path.parent.mkdir(parents=True,exist_ok=True)

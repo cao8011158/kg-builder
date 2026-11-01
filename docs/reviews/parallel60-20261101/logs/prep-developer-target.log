@@ -1,0 +1,23 @@
+test_concurrent_identical_submission_is_accepted_then_duplicate (test_preparation.ItemPolicyTests.test_concurrent_identical_submission_is_accepted_then_duplicate) ... ok
+test_empty_is_terminal (test_preparation.ItemPolicyTests.test_empty_is_terminal) ... ok
+test_failed_second_review_drops_only_item (test_preparation.ItemPolicyTests.test_failed_second_review_drops_only_item) ... ok
+test_jev_stats_survive_reopen_and_terminal_replay (test_preparation.ItemPolicyTests.test_jev_stats_survive_reopen_and_terminal_replay) ... ok
+test_keyed_repair_freezes_approved_and_partial_snapshot (test_preparation.ItemPolicyTests.test_keyed_repair_freezes_approved_and_partial_snapshot) ... ok
+test_parallel_api_extractors_share_claim_validator (test_preparation.ItemPolicyTests.test_parallel_api_extractors_share_claim_validator) ... ok
+test_parallel_scope_claims_overlap_without_duplicates (test_preparation.ItemPolicyTests.test_parallel_scope_claims_overlap_without_duplicates) ... ok
+test_plural_error_audits_and_diagnostic_failure_are_retained (test_preparation.ItemPolicyTests.test_plural_error_audits_and_diagnostic_failure_are_retained) ... ok
+test_source_change_revokes_approval (test_preparation.ItemPolicyTests.test_source_change_revokes_approval) ... ok
+test_wrong_review_hash_does_not_approve (test_preparation.ItemPolicyTests.test_wrong_review_hash_does_not_approve) ... ok
+test_append_only_audit_and_recovered_transient_error (test_preparation.PreparationTests.test_append_only_audit_and_recovered_transient_error) ... ok
+test_balanced_sources_topics_and_resume_without_refetch (test_preparation.PreparationTests.test_balanced_sources_topics_and_resume_without_refetch) ... ok
+test_claim_duplicate_stale_source_and_repair (test_preparation.PreparationTests.test_claim_duplicate_stale_source_and_repair) ... ok
+test_claim_locality_ignores_completed_same_kind_tasks (test_preparation.PreparationTests.test_claim_locality_ignores_completed_same_kind_tasks) ... ok
+test_repair_limit_and_expired_lease (test_preparation.PreparationTests.test_repair_limit_and_expired_lease) ... ok
+test_shortfall_and_stop_before_loop (test_preparation.PreparationTests.test_shortfall_and_stop_before_loop) ... ok
+test_streaming_snapshot_and_restart (test_preparation.PreparationTests.test_streaming_snapshot_and_restart) ... ok
+test_terminal_replay_preserves_first_completion_and_work (test_preparation.PreparationTests.test_terminal_replay_preserves_first_completion_and_work) ... ok
+
+----------------------------------------------------------------------
+Ran 18 tests in 3.195s
+
+OK

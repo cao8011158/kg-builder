@@ -1,0 +1,32 @@
+# Parallel item review workflow — 2026-11-01
+
+Baseline: 01fd0078afd326247a47cc16a561b9c16922fa13. This is a new authorized development step, not a restart of the previous three review rounds. It supersedes the paper-wide field gate for NEW runs only. Historical runs and reports remain truthful/readable.
+
+## Shared API component
+
+Owner: decision_api.py and tests/test_decision_api.py. Add JevClient(max_concurrency=4), bounded real HTTP concurrency across ALL users sharing one client, and concurrent dispatch in _run over independent bounded requests. Preserve exact state/ID/field binding, payload bounds, ordered result association, native response validation, request IDs, bounded backoff and sanitized audits. Avoid shared mutable last_request_audit races; failures must carry their own audit, outstanding work must be drained/cancelled coherently. Do not lose the public legacy audit field used by current tests. Expose observed request concurrency/started-finished/queue metrics for real timing. Fake clients without concurrency capability may remain serial.
+
+review_extractions keeps existing paper_id/passed/issues/raw keys for legacy mode and adds:
+
+- item_results: list of {field, key, index, choice, confidence, passed}. One per extraction item, key is its original stable item.key (None only for invalid/minimal adapter fixtures; production rejects unkeyed items). passed means supported AND confidence>=min_confidence.
+- completeness: dict field -> {choice, confidence, passed}, for the four adequacy questions. These are diagnostic in item-v1 policy. They NEVER trigger repair or delete an otherwise supported item.
+
+Existing prompts/options/model/confidence default0.7 stay unchanged this step. No fresh keyword semantic heuristics. API developer tests offline only. Shared JevClient supports concurrent decide calls safely; caller imports .max_concurrency and reports .concurrency_stats (serializable dict), or document exact alternative to both other owners immediately.
+
+## Preparation component
+
+Owner: preparation.py, prepare_pipeline.py, preparation tests, optional new item-policy helpers/tests. New runs default review_policy=item-v1; old run configs missing policy retain legacy-paper behavior and cannot be silently rewritten. New default item_max_reviews=2 means initial review + ONE repaired review, not two repairs. Persist per-item state/attempts/source fingerprint and review input hash using stable (paper,field,key), never array position alone. Persist raw draft/task and all per-item audits before filtering. Structurally valid empty arrays are allowed.
+
+Pass each supported item independently. Freeze its exact approved payload; repair submissions cannot change an approved item, introduce a new key, or change source/paper/version pins. Repair claim includes only requested failed keys plus prior payload/issues and exact source. Require repair results contain requested items; merge only those keys while retaining approved items. A full returned draft may contain approved keys only if byte-equivalent/canonically identical to frozen approved payloads. Reordering arrays must not move judgment to a different key. Second failed support review discards only that item from downstream, retaining tombstone/raw audit. Missing/duplicate result keys and wrong review hashes reject rather than manufacturing approval. Any source change revokes affected approvals and stale claims.
+
+Completeness diagnostics do not gate release. Once item work is terminal, at least one approved item -> paper ready (may be partial); no approved items -> explicit terminal no-usable-items state, not fabricated ready. Snapshot arrays contain ONLY approved exact items. Keep field/item outcomes in workflow/snapshot review metadata (not illegal extra keys inside v0.3 extraction). Store reviewed filtered extraction with explicit derivation/provenance so it cannot overwrite a historical original identity silently. Snapshot ready count refers usable papers, not claims of completeness. Preserve all legacy schema support.
+
+run owns bounded independent scope and review workers and concurrent generative API tasks; batches of5 may run in parallel. Use one shared JevClient budget (default4), generative budget(default3). Atomic indexed source/stage claims prevent double processing; do not reset another active worker's processing row. SQLite connections belong to their threads; hold no write transaction across network calls. Preserve master BEGIN IMMEDIATE around source-pin read+ingest, CAS leases, stopped/recovered jobs, original completed timestamp, balanced source collection and immutable hashes. CLI exposes budgets/policy; old modes remain operable. API extraction/repair futures submit through same validator as external workers. Scope still once per paper; no second all-paper rescreen.
+
+## Graph component
+
+Owner: snapshot_graph.py, build_snapshot_graph.py, graph tests. Set CLI Jev budget and use shared concurrent API helpers for pairs/groups/final names; no SQLite use in HTTP threads. API ResearchProblem naming must run bounded parallel requests (default3) and submit on owning DB thread. External multi-worker naming already leases; preserve it. All input vectors form one whole within-kind candidate graph + one RP Leiden proposal before identity decisions. Do not alter k/default identity thresholds, force merges, hide pending, remove group checks or redesign core dependencies during this step. Propagate updated snapshot optional review metadata and source-qualified keys; reject unreviewed extraction snapshots. Idempotent restore, copied-snapshot timestamp acceptance, empty graph, local-vector reuse, full audit/metrics and source-original preservation stay intact.
+
+## Boundaries and evidence
+
+No real API calls by code developers, no secrets in code/logs, no source dataset files in public Git, no main merge, no old master overwrite. Root performs fresh60 in a new isolated run after code review. Generation stays external in the measured run; API concurrency is tested with local/fake transport. Record peak real Jev concurrency, cumulative and wall/union timings separately. Correctness/adversarial tests use synchronization/events to prove overlap and caps, not only arbitrary speed thresholds. Measure actual SQL/VM access under unrelated done history. Run targeted and full unittest. Return developer summaries/logs and don't commit; root pins remote commits for independent review.

@@ -1,4 +1,8 @@
 import os
+import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sys
 import unittest
@@ -6,7 +10,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
-from kg_builder.decision_api import JevClient, classify_scope, review_extractions, judge_pairs, review_groups
+from kg_builder.decision_api import JevClient, classify_scope, review_extractions, review_items, review_completeness, judge_pairs, review_groups
 
 
 class FakeResponse:
@@ -31,6 +35,117 @@ class FakeClient:
 
 
 class DecisionTests(unittest.TestCase):
+    def test_shared_http_budget_and_per_thread_audit(self):
+        client=JevClient(max_concurrency=2, max_retries=0)
+        barrier=threading.Barrier(2, timeout=3)
+        release=threading.Event()
+        entered=[]
+        lock=threading.Lock()
+        questions={'x':{'type':'choice','instructions':'Decide','criteria':{'a':'A','b':'B'}}}
+        def fake_open(request, timeout):
+            marker=json.loads(request.data)['state']['marker']
+            with lock:
+                entered.append(marker)
+                ordinal=len(entered)
+            if ordinal<=2: barrier.wait()
+            self.assertTrue(release.wait(3))
+            if marker == 'bad':
+                raise HTTPError(request.full_url, 403, 'forbidden', {}, None)
+            return FakeResponse({'model':'jev-1.14.0','answers':{'x':{'type':'choice','choice':'a',
+                'probabilities':{'a':1,'b':0},'confidence':1}}})
+        with patch.dict(os.environ,{'TYPESAFE_API_KEY':'private'}),patch('kg_builder.decision_api.urlopen',fake_open),patch('kg_builder.decision_api.json.load',lambda response:response.body):
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                futures=[executor.submit(client.decide, {'marker':marker}, questions)
+                         for marker in ('good','bad','later')]
+                deadline=time.monotonic()+3
+                while len(entered)<2 and time.monotonic()<deadline: time.sleep(.001)
+                self.assertEqual(len(entered),2)
+                self.assertEqual(client.concurrency_stats['active'],2)
+                release.set()
+                outcomes=[]
+                for future in futures:
+                    try: outcomes.append(future.result(timeout=3))
+                    except RuntimeError as exc: outcomes.append(exc)
+        self.assertEqual(client.concurrency_stats['peak_active'],2)
+        self.assertEqual(client.concurrency_stats['started'],3)
+        self.assertEqual(client.concurrency_stats['finished'],3)
+        self.assertGreaterEqual(client.concurrency_stats['peak_queued'],1)
+        self.assertEqual(outcomes[0]['request_id'] != outcomes[2]['request_id'],True)
+        self.assertEqual(outcomes[1].request_audit['status'],'http_error')
+        self.assertNotEqual(outcomes[1].request_audit['request_id'],outcomes[0]['request_id'])
+
+    def test_queue_time_excluded_from_http_duration(self):
+        client=JevClient(max_concurrency=1, max_retries=0)
+        entered=threading.Event(); release=threading.Event()
+        questions={'x':{'type':'choice','instructions':'Decide','criteria':{'a':'A','b':'B'}}}
+        def fake_open(request, timeout):
+            if json.loads(request.data)['state']=='first':
+                entered.set(); self.assertTrue(release.wait(3))
+            return FakeResponse({'model':'jev-1.14.0','answers':{'x':{'type':'choice','choice':'a',
+                'probabilities':{'a':1,'b':0},'confidence':1}}})
+        with patch.dict(os.environ,{'TYPESAFE_API_KEY':'private'}),patch('kg_builder.decision_api.urlopen',fake_open),patch('kg_builder.decision_api.json.load',lambda response:response.body):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                first=executor.submit(client.decide,'first',questions)
+                self.assertTrue(entered.wait(3))
+                second=executor.submit(client.decide,'second',questions)
+                deadline=time.monotonic()+3
+                while client.concurrency_stats['queued']<1 and time.monotonic()<deadline: time.sleep(.001)
+                self.assertEqual(client.concurrency_stats['queued'],1)
+                time.sleep(.04)
+                release.set()
+                first.result(timeout=3); result=second.result(timeout=3)
+        self.assertGreater(result['queue_duration_s'],.03)
+        self.assertLess(result['request_duration_s'],result['queue_duration_s'])
+        self.assertEqual(len(result['http_intervals']),1)
+
+    def test_dispatch_out_of_order_keeps_source_binding(self):
+        barrier=threading.Barrier(2, timeout=3)
+        class ConcurrentFake(FakeClient):
+            max_concurrency=2
+            def decide(self, state, questions):
+                barrier.wait()
+                if state['items'][0]['pair_id']=='0': time.sleep(.03)
+                return super().decide(state,questions)
+        client=ConcurrentFake({'identity':'same'})
+        pairs=[{'pair_id':str(i),'kind':'Method','left':{},'right':{}} for i in range(25)]
+        results=judge_pairs(pairs,client)
+        self.assertEqual([r['pair_id'] for r in results],[str(i) for i in range(25)])
+        self.assertNotEqual(results[0]['raw']['requests'][0]['request_id'],results[24]['raw']['requests'][0]['request_id'])
+
+    def test_concurrent_failure_retains_completed_request_audits(self):
+        barrier=threading.Barrier(2, timeout=3)
+        class FailingFake(FakeClient):
+            max_concurrency=2
+            def decide(self,state,questions):
+                barrier.wait()
+                if state['items'][0]['pair_id']=='24':
+                    error=RuntimeError('request failed')
+                    error.request_audit={'request_id':'failed','status':'http_error'}
+                    raise error
+                return super().decide(state,questions)
+        pairs=[{'pair_id':str(i),'kind':'Method','left':{},'right':{}} for i in range(25)]
+        with self.assertRaisesRegex(RuntimeError,'request failed') as raised:
+            judge_pairs(pairs,FailingFake())
+        self.assertEqual(len(raised.exception.request_audits),2)
+        self.assertEqual(raised.exception.decision_item_ids,['24'])
+
+    def test_item_results_and_diagnostic_completeness(self):
+        extraction={'contributions':[{'key':'stable','description':'claim'}], 'research_problems':[],
+                    'methods':[], 'benchmarks':[]}
+        result=review_extractions([{'paper_id':'p','text':'source','extraction':extraction}],
+            FakeClient({'adequacy_contributions':'omission'}))[0]
+        self.assertFalse(result['passed'])  # Retained paper-wide legacy field.
+        self.assertEqual(result['item_results'],[{'field':'contributions','key':'stable','index':0,
+            'choice':'supported','confidence':.9,'passed':True}])
+        self.assertEqual(result['completeness']['contributions']['choice'],'omission')
+        item={'paper_id':'p','field':'methods','key':'m1','text':'source','item':{'name':'Method'},'input_hash':'abc'}
+        reviewed=review_items([item],FakeClient())[0]
+        self.assertEqual((reviewed['key'],reviewed['input_hash'],reviewed['passed']),('m1','abc',True))
+        diagnostic=review_completeness([{'paper_id':'p','text':'source','extraction':extraction}],
+            FakeClient({'adequacy_contributions':'omission'}))[0]
+        self.assertEqual(diagnostic['completeness']['contributions']['choice'],'omission')
+        self.assertEqual(len(diagnostic['completeness']),4)
+
     def test_native_request_and_audit(self):
         client=JevClient()
         questions={'scope':{'type':'choice','instructions':'Is it relevant?','criteria':{'yes':'Relevant','no':'Absent'}}}
@@ -56,7 +171,12 @@ class DecisionTests(unittest.TestCase):
                        {'type':'choice','choice':'a','probabilities':{'a':1},'confidence':1},
                        {'type':'choice','choice':'a','probabilities':{'a':1,'b':0},'confidence':float('nan')}):
             with self.subTest(answer=answer),patch.dict(os.environ,{'TYPESAFE_API_KEY':'private'}),patch('kg_builder.decision_api.urlopen',return_value=FakeResponse(None)),patch('kg_builder.decision_api.json.load',return_value={'model':'jev-1.14.0','answers':{'x':answer}}):
-                with self.assertRaises(ValueError): client.decide('state',questions)
+                with self.assertRaises(ValueError) as raised: client.decide('state',questions)
+                self.assertEqual(raised.exception.request_audit['status'],'invalid_response')
+        with patch.dict(os.environ,{'TYPESAFE_API_KEY':'private'}),patch('kg_builder.decision_api.urlopen',return_value=FakeResponse(None)),patch('kg_builder.decision_api.json.load',side_effect=ValueError('private response')):
+            with self.assertRaisesRegex(ValueError,'Malformed System One response body') as raised:
+                client.decide('state',questions)
+            self.assertEqual(raised.exception.request_audit['status'],'invalid_response')
 
     def test_retry_is_bounded_and_audited(self):
         client=JevClient(max_retries=1)
@@ -67,6 +187,7 @@ class DecisionTests(unittest.TestCase):
         with patch.dict(os.environ,{'TYPESAFE_API_KEY':'private'}),patch('kg_builder.decision_api.urlopen',side_effect=[failure,FakeResponse(None)]),patch('kg_builder.decision_api.json.load',return_value=answer),patch('kg_builder.decision_api.time.sleep') as sleep:
             result=client.decide('state',questions)
         self.assertEqual(result['attempts'],2)
+        self.assertEqual(len(result['http_intervals']),2)
         self.assertGreaterEqual(result['total_elapsed_s'],result['request_duration_s'])
         sleep.assert_called_once_with(.01)
         with self.assertRaisesRegex(ValueError,'bounded request size'):

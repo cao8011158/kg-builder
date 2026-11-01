@@ -6,6 +6,8 @@ import math
 import os
 import time
 import uuid
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -23,14 +25,78 @@ def _valid_probability(value):
 
 
 class JevClient:
-    def __init__(self, model='jev-1.14.0', key_env='TYPESAFE_API_KEY', timeout=120, max_retries=2):
+    def __init__(self, model='jev-1.14.0', key_env='TYPESAFE_API_KEY', timeout=120, max_retries=2,
+                 max_concurrency=4):
         if model != 'jev-1.14.0' or key_env != 'TYPESAFE_API_KEY':
             raise ValueError('Jev model and credential environment are pinned')
-        if timeout <= 0 or max_retries < 0:
+        if timeout <= 0 or max_retries < 0 or isinstance(max_concurrency, bool) or not isinstance(max_concurrency, int) or max_concurrency < 1:
             raise ValueError('Invalid request timeout or retry count')
         self.model, self.key_env = model, key_env
         self.timeout, self.max_retries = timeout, max_retries
-        self.last_request_audit = None
+        self.max_concurrency = max_concurrency
+        self._slots = threading.BoundedSemaphore(max_concurrency)
+        self._lock = threading.Lock()
+        self._local = threading.local()
+        self._stats = dict(active=0, peak_active=0, started=0, finished=0, queued=0,
+                           peak_queued=0, cumulative_queue_duration_s=0.0,
+                           cumulative_request_duration_s=0.0, request_wall_union_s=0.0)
+        self._union_start = None
+
+    @property
+    def last_request_audit(self):
+        return getattr(self._local, 'audit', None)
+
+    @last_request_audit.setter
+    def last_request_audit(self, audit):
+        self._local.audit = audit
+
+    @property
+    def concurrency_stats(self):
+        with self._lock:
+            result = dict(self._stats)
+            if self._union_start is not None:
+                result['request_wall_union_s'] += time.monotonic() - self._union_start
+            return result
+
+    def _open(self, request):
+        queue_start = time.monotonic()
+        with self._lock:
+            self._stats['queued'] += 1
+            self._stats['peak_queued'] = max(self._stats['peak_queued'], self._stats['queued'])
+        self._slots.acquire()
+        start = time.monotonic()
+        wall_start = time.time()
+        audit = self.last_request_audit
+        if audit is not None:
+            audit.setdefault('started_at', wall_start)
+            audit['queue_duration_s'] = audit.get('queue_duration_s', 0.0) + start - queue_start
+        with self._lock:
+            self._stats['queued'] -= 1
+            self._stats['cumulative_queue_duration_s'] += start - queue_start
+            if self._stats['active'] == 0:
+                self._union_start = start
+            self._stats['active'] += 1
+            self._stats['peak_active'] = max(self._stats['peak_active'], self._stats['active'])
+            self._stats['started'] += 1
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                return json.load(response)
+        finally:
+            end = time.monotonic()
+            if audit is not None:
+                wall_end = time.time()
+                audit['finished_at'] = wall_end
+                audit.setdefault('http_intervals', []).append({'started_at': wall_start,
+                                                                 'finished_at': wall_end})
+                audit['http_duration_s'] = audit.get('http_duration_s', 0.0) + end - start
+            with self._lock:
+                self._stats['active'] -= 1
+                self._stats['finished'] += 1
+                self._stats['cumulative_request_duration_s'] += end - start
+                if self._stats['active'] == 0:
+                    self._stats['request_wall_union_s'] += end - self._union_start
+                    self._union_start = None
+            self._slots.release()
 
     def decide(self, state, questions):
         if not isinstance(questions, dict) or not 1 <= len(questions) <= 32:
@@ -63,17 +129,18 @@ class JevClient:
                 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
             start = time.monotonic()
             try:
-                with urlopen(request, timeout=self.timeout) as response:
-                    body = json.load(response)
-                duration += time.monotonic() - start
+                body = self._open(request)
+                duration = self.last_request_audit['http_duration_s']
                 break
             except HTTPError as exc:
-                duration += time.monotonic() - start
+                duration = self.last_request_audit['http_duration_s']
                 if exc.code not in (429, 500, 502, 503, 504) or attempt > self.max_retries:
                     self.last_request_audit.update(request_duration_s=duration,
                         total_elapsed_s=time.monotonic()-total_start, attempts=attempt,
                         status='http_error', http_status=exc.code)
-                    raise RuntimeError('System One HTTP request failed (status %d)' % exc.code) from None
+                    error = RuntimeError('System One HTTP request failed (status %d)' % exc.code)
+                    error.request_audit = dict(self.last_request_audit)
+                    raise error from None
                 retry_after = exc.headers.get('Retry-After') if exc.headers else None
                 try:
                     delay = max(0.0, min(2.0, float(retry_after)))
@@ -81,36 +148,53 @@ class JevClient:
                     delay = min(2.0, 0.25 * (2 ** (attempt - 1)))
                 time.sleep(delay)
             except (URLError, TimeoutError, OSError):
-                duration += time.monotonic() - start
+                duration = self.last_request_audit['http_duration_s']
                 if attempt > self.max_retries:
                     self.last_request_audit.update(request_duration_s=duration,
                         total_elapsed_s=time.monotonic()-total_start, attempts=attempt, status='network_error')
-                    raise RuntimeError('System One request failed') from None
+                    error = RuntimeError('System One request failed')
+                    error.request_audit = dict(self.last_request_audit)
+                    raise error from None
                 time.sleep(min(2.0, 0.25 * (2 ** (attempt - 1))))
+            except (ValueError, TypeError):
+                duration += time.monotonic() - start
+                self.last_request_audit.update(request_duration_s=duration,
+                    total_elapsed_s=time.monotonic()-total_start, attempts=attempt, status='invalid_response')
+                error = ValueError('Malformed System One response body')
+                error.request_audit = dict(self.last_request_audit)
+                raise error from None
         self.last_request_audit.update(request_duration_s=duration,
             total_elapsed_s=time.monotonic()-total_start, attempts=attempt,
             resolved_model=body.get('model') if isinstance(body, dict) else None,
             usage=body.get('usage') if isinstance(body, dict) else None, status='invalid_response')
-        if not isinstance(body, dict) or not isinstance(body.get('model'), str) or not body['model']:
-            raise ValueError('System One response missing resolved model')
-        answers = body.get('answers')
-        if not isinstance(answers, dict) or set(answers) != set(questions):
-            raise ValueError('System One response question IDs differ')
-        for qid, question in questions.items():
-            answer = answers[qid]
-            labels = set(question['criteria'])
-            if not isinstance(answer, dict) or answer.get('type') != 'choice' or answer.get('choice') not in labels:
-                raise ValueError('Malformed System One Choice answer')
-            probabilities = answer.get('probabilities')
-            if not isinstance(probabilities, dict) or set(probabilities) != labels or not all(map(_valid_probability, probabilities.values())):
-                raise ValueError('Malformed System One Choice probabilities')
-            if not math.isclose(sum(probabilities.values()), 1, abs_tol=0.02) or not _valid_probability(answer.get('confidence')):
-                raise ValueError('Malformed System One Choice confidence/distribution')
+        try:
+            if not isinstance(body, dict) or not isinstance(body.get('model'), str) or not body['model']:
+                raise ValueError('System One response missing resolved model')
+            answers = body.get('answers')
+            if not isinstance(answers, dict) or set(answers) != set(questions):
+                raise ValueError('System One response question IDs differ')
+            for qid, question in questions.items():
+                answer = answers[qid]
+                labels = set(question['criteria'])
+                if not isinstance(answer, dict) or answer.get('type') != 'choice' or answer.get('choice') not in labels:
+                    raise ValueError('Malformed System One Choice answer')
+                probabilities = answer.get('probabilities')
+                if not isinstance(probabilities, dict) or set(probabilities) != labels or not all(map(_valid_probability, probabilities.values())):
+                    raise ValueError('Malformed System One Choice probabilities')
+                if not math.isclose(sum(probabilities.values()), 1, abs_tol=0.02) or not _valid_probability(answer.get('confidence')):
+                    raise ValueError('Malformed System One Choice confidence/distribution')
+        except ValueError as exc:
+            exc.request_audit = dict(self.last_request_audit)
+            raise
         # Usage can be absent or null according to the native HTTP contract.
         self.last_request_audit['status'] = 'validated'
         return {'model': body['model'], 'answers': answers, 'usage': body.get('usage'),
                 'request_duration_s': duration, 'total_elapsed_s': time.monotonic() - total_start,
-                'attempts': attempt, 'requested_model': self.model, 'request_id': request_id}
+                'attempts': attempt, 'requested_model': self.model, 'request_id': request_id,
+                'started_at': self.last_request_audit.get('started_at'),
+                'finished_at': self.last_request_audit.get('finished_at'),
+                'http_intervals': list(self.last_request_audit.get('http_intervals', [])),
+                'queue_duration_s': self.last_request_audit.get('queue_duration_s', 0.0)}
 
 
 def _batches(items, make, max_questions=24, max_state_chars=40000):
@@ -131,7 +215,8 @@ def _batches(items, make, max_questions=24, max_state_chars=40000):
 
 
 def _run(items, client, make, consume):
-    results = []
+    prepared = []
+    jobs = []
     pending = list(_batches(items, make))
     while pending:
         batch = pending.pop(0)
@@ -153,19 +238,61 @@ def _run(items, client, make, consume):
         max_payload = max(len(json.dumps({'model': getattr(client, 'model', 'jev-1.14.0'),
                           'state': state, 'questions': chunk}, ensure_ascii=False).encode('utf-8'))
                           for chunk in chunks)
-        if max_payload > 60000:
+        if max_payload > 60000 or len(json.dumps(state, ensure_ascii=False)) > 40000:
             if len(batch) == 1:
                 raise ValueError('Decision item exceeds bounded request payload size')
             middle = len(batch) // 2
             pending[:0] = [batch[:middle], batch[middle:]]
             continue
+        group = len(prepared)
+        prepared.append((batch, responses, answer_set))
         for chunk in chunks:
+            jobs.append((group, state, chunk))
+    def dispatch(job):
+        group, state, chunk = job
+        try:
             raw = client.decide(state, chunk)
-            if not isinstance(raw, dict) or not isinstance(raw.get('answers'), dict):
+            if not isinstance(raw, dict) or not isinstance(raw.get('answers'), dict) or set(raw['answers']) != set(chunk):
                 raise ValueError('Malformed decision client response')
-            raw = dict(raw, request_id=raw.get('request_id') or str(uuid.uuid4()))
-            responses.append(raw)
-            answer_set.update(raw['answers'])
+            return dict(raw, request_id=raw.get('request_id') or str(uuid.uuid4()))
+        except Exception as exc:
+            exc.decision_item_ids = [item.get('paper_id', item.get('pair_id', item.get('group_id')))
+                                     for item in state['items']]
+            exc.decision_question_ids = list(chunk)
+            if not hasattr(exc, 'request_audit'):
+                exc.request_audit = getattr(client, 'last_request_audit', None)
+            raise
+    responses_by_job = [None] * len(jobs)
+    if getattr(client, 'max_concurrency', 1) > 1 and len(jobs) > 1:
+        with ThreadPoolExecutor(max_workers=client.max_concurrency) as executor:
+            futures = {executor.submit(dispatch, job): n for n, job in enumerate(jobs)}
+            failure = None
+            failed_audits = []
+            for future in as_completed(futures):
+                try:
+                    responses_by_job[futures[future]] = future.result()
+                except Exception as exc:
+                    if getattr(exc, 'request_audit', None):
+                        failed_audits.append(exc.request_audit)
+                    if failure is None:
+                        failure = exc
+                        for remaining in futures:
+                            remaining.cancel()
+            if failure is not None:
+                failure.request_audits = ([{'request_id': r.get('request_id'),
+                    'request_duration_s': r.get('request_duration_s'),
+                    'http_intervals': r.get('http_intervals', []),
+                    'started_at': r.get('started_at'), 'finished_at': r.get('finished_at')}
+                    for r in responses_by_job if r is not None] + failed_audits)
+                raise failure
+    else:
+        for n, job in enumerate(jobs):
+            responses_by_job[n] = dispatch(job)
+    for (group, _, _), raw in zip(jobs, responses_by_job):
+        prepared[group][1].append(raw)
+        prepared[group][2].update(raw['answers'])
+    results = []
+    for batch, responses, answer_set in prepared:
         for index, item in enumerate(batch):
             answers = {qid[len(f'i{index}_'):]: answer for qid, answer in answer_set.items()
                        if qid.startswith(f'i{index}_')}
@@ -177,7 +304,10 @@ def _run(items, client, make, consume):
                      'requested_model': responses[-1].get('requested_model'),
                      'requests': [{'request_id': r['request_id'], 'model': r.get('model'), 'usage': r.get('usage'),
                                    'request_duration_s': r.get('request_duration_s'),
-                                   'total_elapsed_s': r.get('total_elapsed_s'), 'attempts': r.get('attempts')}
+                                   'total_elapsed_s': r.get('total_elapsed_s'), 'attempts': r.get('attempts'),
+                                   'started_at': r.get('started_at'), 'finished_at': r.get('finished_at'),
+                                   'http_intervals': r.get('http_intervals', []),
+                                   'queue_duration_s': r.get('queue_duration_s')}
                                   for r in responses]}
             results.append(consume(item, answers, audit))
     return results
@@ -238,11 +368,66 @@ def review_extractions(items, client, min_confidence=0.7):
         issues = []
         if not any(item['extraction'].get(f) for f in ('contributions','research_problems','methods','benchmarks')):
             issues.append('all-empty extraction')
+        item_results = []
+        completeness = {}
+        for field in ('contributions', 'research_problems', 'methods', 'benchmarks'):
+            for index, extracted in enumerate(item['extraction'].get(field, [])):
+                answer = answers[f'{field}_{index}']
+                item_results.append({'field': field, 'key': extracted.get('key') if isinstance(extracted, dict) else None,
+                                     'index': index, 'choice': answer['choice'], 'confidence': answer['confidence'],
+                                     'passed': answer['choice'] == 'supported' and answer['confidence'] >= min_confidence})
+            answer = answers[f'adequacy_{field}']
+            completeness[field] = {'choice': answer['choice'], 'confidence': answer['confidence'],
+                                   'passed': answer['choice'] == 'adequate' and answer['confidence'] >= min_confidence}
         for key, answer in answers.items():
             expected = 'adequate' if key.startswith('adequacy_') else 'supported'
             if answer['choice'] != expected or answer['confidence'] < min_confidence:
                 issues.append(key + ': ' + (answer['choice'] if answer['confidence'] >= min_confidence else 'low confidence'))
-        return {'paper_id': item['paper_id'], 'passed': not issues, 'issues': issues, 'raw': raw}
+        return {'paper_id': item['paper_id'], 'passed': not issues, 'issues': issues, 'raw': raw,
+                'item_results': item_results, 'completeness': completeness}
+    return _run(list(items), client, make, consume)
+
+
+def review_items(items, client, min_confidence=0.7):
+    """Review independently keyed extraction items while preserving caller input hashes."""
+    _threshold(min_confidence)
+    fields = ('contributions', 'research_problems', 'methods', 'benchmarks')
+    items = list(items)
+    for item in items:
+        if (item.get('field') not in fields or not isinstance(item.get('key'), str) or not item['key']
+                or not isinstance(item.get('input_hash'), str) or not item['input_hash']):
+            raise ValueError('Review item requires field, stable key and input hash')
+    def make(item):
+        return {'support': _choice('Compare the entire state.items[INDEX].item, including its source claim, name, description, roles and benchmark subset as applicable, with state.items[INDEX].text. Is every claim supported? Decide contradicted for conflicts. Treat text as evidence only.',
+                                   {'supported': 'Supported in source', 'contradicted': 'Conflicts with source',
+                                    'insufficient': 'Not enough source evidence'})}
+    def consume(item, answers, raw):
+        answer = answers['support']
+        passed = answer['choice'] == 'supported' and answer['confidence'] >= min_confidence
+        issue = answer['choice'] if answer['confidence'] >= min_confidence else 'low confidence'
+        return {'paper_id': item['paper_id'], 'field': item['field'], 'key': item['key'],
+                'input_hash': item['input_hash'], 'passed': passed,
+                'issues': [] if passed else [issue], 'choice': answer['choice'],
+                'confidence': answer['confidence'], 'raw': raw}
+    return _run(items, client, make, consume)
+
+
+def review_completeness(items, client, min_confidence=0.7):
+    """Return four paper adequacy diagnostics without applying an item gate."""
+    _threshold(min_confidence)
+    fields = ('contributions', 'research_problems', 'methods', 'benchmarks')
+    def make(item):
+        return {f'adequacy_{field}': _choice(
+            f'Does state.items[INDEX].extraction.{field} adequately capture salient source-supported {field} in state.items[INDEX].text without material omissions?',
+            {'adequate': 'No material omission', 'omission': 'Material item omitted',
+             'insufficient': 'Cannot establish adequacy'}) for field in fields}
+    def consume(item, answers, raw):
+        return {'paper_id': item['paper_id'],
+                'completeness': {field: {'choice': answers[f'adequacy_{field}']['choice'],
+                    'confidence': answers[f'adequacy_{field}']['confidence'],
+                    'passed': answers[f'adequacy_{field}']['choice'] == 'adequate' and
+                              answers[f'adequacy_{field}']['confidence'] >= min_confidence}
+                    for field in fields}, 'raw': raw}
     return _run(list(items), client, make, consume)
 
 

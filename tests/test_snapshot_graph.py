@@ -1,5 +1,6 @@
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -9,9 +10,9 @@ from kg_builder.extraction_validation import RETRIEVAL_SCHEMA_VERSION
 from kg_builder.semantic_store import SemanticStore
 
 
-def fixture(path):
+def fixture(path, n=2):
     papers=[];extractions=[];vectors=[]
-    for n in (1,2):
+    for n in range(1,n+1):
         pid=f'paper:{n}';vid=f'{pid}@v1';url=f'https://example.org/{n}'
         papers.append({'paper_id':pid,'title':f'Title {n}','version_id':vid,
                        'paper_version':{'version_label':'v1','source_url':url},'text':f'Text {n}', 'source_hash':None})
@@ -29,7 +30,7 @@ def fixture(path):
             vectors.append({'item_key':pid+'::'+item['key'],'kind':kind,'text':item['name']+'\n'+item['description'] if kind!='Contribution' else item['description'],
                             'model_id':'test-embed','vector':[1.0,0.0] if kind=='ResearchProblem' else ([0.0,1.0] if kind=='Method' else [0.70710678,0.70710678])})
     value={'schema_version':'research-kg-prepared-snapshot/1','run_id':'test','papers':papers,
-           'extractions':extractions,'vectors':vectors,'counts':{'accepted':2}}
+           'extractions':extractions,'vectors':vectors,'counts':{'accepted':n}}
     value['snapshot_hash']=canonical_hash(value)
     path.write_text(json.dumps(value),encoding='utf-8')
     return value
@@ -49,6 +50,95 @@ class FakeEmbedding:
 
 
 class SnapshotGraphTests(unittest.TestCase):
+    def test_jev_http_intervals_are_distinct_from_backoff_and_unique_on_replay(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'snapshot.json';fixture(source)
+            job=SnapshotGraph(source,root/'job')
+            raw={'raw':{'requests':[
+                {'request_id':'first','request_duration_s':2,'total_elapsed_s':7,'attempts':2,
+                 'started_at':10,'finished_at':17,'http_intervals':[
+                     {'started_at':10,'finished_at':11},{'started_at':16,'finished_at':17}]},
+                {'request_id':'second','request_duration_s':1,'total_elapsed_s':1,'attempts':1,
+                 'started_at':10.5,'finished_at':11.5,'http_intervals':[
+                     {'started_at':10.5,'finished_at':11.5}]}]}}
+            with job.db:job._record_requests(raw);job._record_requests(raw)
+            state=job.status()
+            self.assertEqual(state['jev_request_count'],2)
+            self.assertEqual(state['jev_request_peak_concurrency'],2)
+            self.assertAlmostEqual(state['jev_request_wall_union_seconds'],2.5)
+            self.assertEqual(state['jev_http_attempt_intervals'],3)
+            self.assertEqual(state['stage_seconds']['jev_api_request_seconds'],3)
+            job.close()
+
+    def test_item_snapshot_requires_reviewed_exact_approved_keys(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source=Path(tmp)/'snapshot.json'
+            value=fixture(source)
+            value['config']={'review_policy':'item-v1'}
+            value['review_metadata']={x['paper_id']:{'policy':'item-v1','items':[
+                {'field':field,'key':item['key'],'state':'approved','approved_payload_hash':canonical_hash(item)}
+                for field in ('research_problems','methods','benchmarks','contributions')
+                for item in x[field]]} for x in value['extractions']}
+            def save():
+                value['snapshot_hash']=canonical_hash({k:v for k,v in value.items() if k!='snapshot_hash'})
+                source.write_text(json.dumps(value),encoding='utf-8')
+            save()
+            job=SnapshotGraph(source,Path(tmp)/'job');job.close()
+            value['review_metadata']['paper:1']['items'][0]['state']='dropped';save()
+            with self.assertRaisesRegex(ValueError,'differs from approved'):
+                SnapshotGraph(source,Path(tmp)/'other')
+            value['review_metadata']['paper:1']['items'][0]['state']='approved'
+            value['extractions'][0]['status']='draft';save()
+            with self.assertRaisesRegex(ValueError,'Unreviewed'):
+                SnapshotGraph(source,Path(tmp)/'third')
+
+    def test_parallel_api_names_bind_out_of_order_and_release_failed_own_lease(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'snapshot.json';fixture(source,n=4)
+            barrier=threading.Barrier(2)
+            lock=threading.Lock();active=[0];peak=[0];calls=[0]
+            class Namer:
+                def generate_json(self,prompt,state,*,required_keys):
+                    with lock:
+                        active[0]+=1;peak[0]=max(peak[0],active[0]);calls[0]+=1
+                        first_wave=calls[0]<=2
+                    try:
+                        if first_wave:barrier.wait(timeout=5)
+                        # Reversed completion demonstrates binding by group ID.
+                        if state['members'][0]['paper_id']=='paper:1':
+                            threading.Event().wait(.04)
+                        return {'group_id':state['group_id'],'name':state['members'][0]['paper_id'],
+                                'description':'Source grounded'}
+                    finally:
+                        with lock:active[0]-=1
+            def distinct(items,client):
+                return [{**r,'decision':'different'} for r in pairs(items,client)]
+            with patch('kg_builder.decision_api.judge_pairs',distinct),patch('kg_builder.decision_api.review_groups',groups):
+                job=SnapshotGraph(source,root/'job',client=object(),k=1,model=FakeEmbedding(),
+                                  name_mode='api',namer=Namer(),name_concurrency=2)
+                state=job.run()
+                self.assertEqual(state['phase'],'complete')
+                self.assertEqual(state['name_tasks']['done'],4)
+                self.assertEqual(peak[0],2)
+                for row in job.db.execute("SELECT g.name,g.members_json FROM groups g WHERE g.kind='ResearchProblem'"):
+                    mid=json.loads(row['members_json'])[0]
+                    paper=SemanticStore(root/'job'/'semantic.sqlite')
+                    try:
+                        expected=paper.db.execute('SELECT s.paper_id FROM mentions m JOIN sources s ON m.extraction_id=s.extraction_id WHERE mention_id=?',(mid,)).fetchone()[0]
+                    finally:paper.close()
+                    self.assertEqual(row['name'],expected)
+                job.close()
+            class FailingNamer:
+                def generate_json(self,prompt,state,*,required_keys):
+                    if state['members'][0]['paper_id']=='paper:1':raise RuntimeError('naming failed')
+                    return {'group_id':state['group_id'],'name':'Other','description':'Good'}
+            with patch('kg_builder.decision_api.judge_pairs',distinct),patch('kg_builder.decision_api.review_groups',groups):
+                job=SnapshotGraph(source,root/'failed',client=object(),k=1,model=FakeEmbedding(),
+                                  name_mode='api',namer=FailingNamer(),name_concurrency=2)
+                with self.assertRaisesRegex(RuntimeError,'naming failed'):job.run()
+                self.assertEqual(job.status()['name_tasks'],{'done':1,'queued':3})
+                job.close()
+
     def test_build_names_recovery_retrieval_and_immutable_input(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);source=root/'snapshot.json';value=fixture(source)

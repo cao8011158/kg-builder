@@ -20,6 +20,8 @@ def main(argv=None):
     parser.add_argument('--embedding-cache-dir',type=Path)
     sub=parser.add_subparsers(dest='command',required=True)
     run=sub.add_parser('run');run.add_argument('--jev-model',default='jev-1.14.0');run.add_argument('--batch-size',type=int,default=32)
+    run.add_argument('--jev-concurrency',type=int,default=4)
+    run.add_argument('--name-concurrency',type=int,default=3)
     claim=sub.add_parser('claim');claim.add_argument('--worker',required=True);claim.add_argument('--limit',type=int,default=5);claim.add_argument('--output',required=True,type=Path)
     submit=sub.add_parser('submit');submit.add_argument('--input',required=True,type=Path)
     sub.add_parser('status')
@@ -27,7 +29,7 @@ def main(argv=None):
     client=None
     if args.command=='run':
         from kg_builder.decision_api import JevClient
-        client=JevClient(model=args.jev_model)
+        client=JevClient(model=args.jev_model,max_concurrency=args.jev_concurrency)
     k=args.k
     name_mode=args.name_mode
     if args.command!='run' and (args.job_dir/'graph.sqlite').exists():
@@ -36,7 +38,7 @@ def main(argv=None):
             settings=dict(db.execute("SELECT key,value FROM meta WHERE key IN ('k','name_mode')"))
         k=k if k is not None else int(settings['k'])
         name_mode=name_mode or settings['name_mode']
-    job=SnapshotGraph(args.snapshot,args.job_dir,client=client,k=k or 20,name_mode=name_mode or 'external',batch_size=getattr(args,'batch_size',32),name_base_url=args.name_base_url,name_model=args.name_model,read_input=args.command=='run',embedding_cache_dir=args.embedding_cache_dir)
+    job=SnapshotGraph(args.snapshot,args.job_dir,client=client,k=k or 20,name_mode=name_mode or 'external',batch_size=getattr(args,'batch_size',32),name_concurrency=getattr(args,'name_concurrency',3),name_base_url=args.name_base_url,name_model=args.name_model,read_input=args.command=='run',embedding_cache_dir=args.embedding_cache_dir)
     try:
         if args.command=='run':result=job.run()
         elif args.command=='claim':

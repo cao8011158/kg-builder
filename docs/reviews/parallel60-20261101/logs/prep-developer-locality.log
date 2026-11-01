@@ -1,0 +1,2 @@
+done_rows=1000 claimed= 1 sqlite_vm_steps= 341
+indexed_queue_plan= [(5, 0, 61, 'SEARCH tasks USING INDEX idx_tasks_queued (kind=?)')]

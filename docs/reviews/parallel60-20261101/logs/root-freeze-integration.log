@@ -1,0 +1,78 @@
+{
+  "result": "PASS",
+  "prepared_papers": 6,
+  "initial_tasks": 6,
+  "item_repair_tasks": 6,
+  "retained_items": 18,
+  "discarded_items": 6,
+  "completeness_omission_diagnostic_nonblocking": true,
+  "observed_fake_concurrency": 2,
+  "graph": {
+    "phase": "complete",
+    "snapshot_hash": "40b8ff859632c18f3900eb09d336794bfdd01231e94f562c3b13ca43262e0727",
+    "candidate_pairs": {
+      "different": 24
+    },
+    "groups": {
+      "accepted": 12
+    },
+    "name_tasks": {
+      "done": 6
+    },
+    "mentions": {
+      "new_entity": 12
+    },
+    "stage_seconds": {
+      "snapshot_import_cpu": 0.04941129099825048,
+      "candidate_graph_cpu": 0.037219273999653524,
+      "jev_api_request_seconds": 0.030709505081176758,
+      "jev_api_elapsed_seconds": 0.030709505081176758,
+      "jev_retry_count": 0.0,
+      "jev_pair_wall": 0.014044269002624787,
+      "jev_group_wall": 0.015164721000473946,
+      "materialize_cpu": 0.010137439003301552,
+      "name_queued_wait": 0.020551681518554688,
+      "name_external_service": 0.033466339111328125,
+      "jev_final_name_wall": 0.012967752001713961,
+      "retrieval_index_cpu": 0.006678860001557041
+    },
+    "pending_pairs": 0,
+    "pending_groups": 0,
+    "pending_mentions": 0,
+    "started_at": 1793537799.4348192,
+    "completed_at": 1793537799.592832,
+    "elapsed_wall_seconds": 0.15801286697387695,
+    "jev_request_count": 3,
+    "jev_request_peak_concurrency": 1,
+    "jev_request_wall_union_seconds": 0.030709505081176758,
+    "jev_logical_request_intervals": 3,
+    "jev_http_attempt_intervals": 3,
+    "jev_client_concurrency": {
+      "peak_active": 2,
+      "active": 0
+    },
+    "index_status": "verified",
+    "index_builds": 4,
+    "index_cache_hits": 18,
+    "index_embeddings_computed": 0
+  },
+  "structural": {
+    "passed": true,
+    "failure_counts": {},
+    "failure_total": 0,
+    "details": [],
+    "details_truncated": false,
+    "coverage": {
+      "approved_items": 18,
+      "sources": 6,
+      "mentions": 12,
+      "contributions": 6,
+      "entities": 12,
+      "accepted_groups": 12,
+      "pending_groups": 0,
+      "pending_pairs": 0,
+      "pending_mentions": 0
+    },
+    "complete_resolution": true
+  }
+}

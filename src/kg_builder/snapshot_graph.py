@@ -7,6 +7,7 @@ import os
 import sqlite3
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from .extraction_validation import validate_extraction, RETRIEVAL_SCHEMA_VERSION
@@ -34,6 +35,40 @@ def read_snapshot(path):
         raise ValueError('Prepared snapshot digest mismatch')
     if not isinstance(snapshot.get('papers'), list) or not isinstance(snapshot.get('extractions'), list) or not isinstance(snapshot.get('vectors'), list):
         raise ValueError('Prepared snapshot missing source arrays')
+    policy = snapshot.get('config', {}).get('review_policy', 'legacy-paper')
+    if policy not in ('legacy-paper', 'item-v1'):
+        raise ValueError('Unknown snapshot review policy')
+    metadata = snapshot.get('review_metadata')
+    if policy == 'item-v1' and not isinstance(metadata, dict):
+        raise ValueError('Item-reviewed snapshot missing review metadata')
+    fields = ('research_problems', 'methods', 'benchmarks', 'contributions')
+    for wrapper in snapshot['extractions']:
+        extraction = _extraction(wrapper)
+        if extraction.get('status') != 'reviewed':
+            raise ValueError('Unreviewed extraction snapshot')
+        if policy == 'item-v1':
+            paper_id = extraction.get('paper_id')
+            review = metadata.get(paper_id)
+            if not isinstance(review, dict) or review.get('policy') != 'item-v1' or not isinstance(review.get('items'), list):
+                raise ValueError('Item-reviewed extraction missing provenance')
+            approved = {}
+            for item in review['items']:
+                if not isinstance(item, dict) or item.get('field') not in fields or not isinstance(item.get('key'), str):
+                    raise ValueError('Malformed item review provenance')
+                if item.get('state') == 'approved':
+                    identity=(item['field'], item['key'])
+                    if identity in approved:raise ValueError('Duplicate approved item provenance')
+                    if not isinstance(item.get('approved_payload_hash'),str):
+                        raise ValueError('Approved item missing payload fingerprint')
+                    approved[identity]=item['approved_payload_hash']
+            actual = [(field, item.get('key')) for field in fields for item in extraction.get(field, [])]
+            if len(set(actual)) != len(actual) or set(actual) != set(approved):
+                raise ValueError('Snapshot extraction differs from approved items')
+            for field in fields:
+                for item in extraction.get(field, []):
+                    expected=approved[(field,item['key'])]
+                    if expected != canonical_hash(item):
+                        raise ValueError('Snapshot approved item payload differs from review')
     return snapshot, hashlib.sha256(raw).hexdigest()
 
 
@@ -60,7 +95,7 @@ def _paper(papers, extraction):
 
 class SnapshotGraph:
     def __init__(self, snapshot_path, job_dir, *, client=None, k=20, batch_size=32,
-                 name_mode='external', model=None, lease_seconds=900, namer=None, name_base_url=None, name_model=None, read_input=True, embedding_cache_dir=None):
+                 name_mode='external', model=None, lease_seconds=900, namer=None, name_base_url=None, name_model=None, read_input=True, embedding_cache_dir=None, name_concurrency=3):
         self.snapshot_path = Path(snapshot_path).resolve()
         self.job_dir = Path(job_dir).resolve()
         self.job_dir.mkdir(parents=True, exist_ok=True)
@@ -85,6 +120,9 @@ class SnapshotGraph:
         self.namer = namer
         self.name_base_url = name_base_url
         self.name_model = name_model
+        if not isinstance(name_concurrency, int) or isinstance(name_concurrency, bool) or name_concurrency < 1:
+            raise ValueError('Positive name_concurrency required')
+        self.name_concurrency = name_concurrency
         self.embedding_cache_dir = embedding_cache_dir or os.getenv('FASTEMBED_CACHE_PATH')
         self.lease_seconds = lease_seconds
         if not isinstance(k, int) or k < 1 or not isinstance(batch_size, int) or batch_size < 1:
@@ -97,7 +135,7 @@ class SnapshotGraph:
         self.db.executescript('''
         CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS stage(name TEXT PRIMARY KEY,seconds REAL NOT NULL);
-        CREATE TABLE IF NOT EXISTS jev_requests(request_id TEXT PRIMARY KEY,request_duration REAL,total_elapsed REAL,attempts INTEGER,model TEXT,usage_json TEXT);
+        CREATE TABLE IF NOT EXISTS jev_requests(request_id TEXT PRIMARY KEY,request_duration REAL,total_elapsed REAL,attempts INTEGER,model TEXT,usage_json TEXT,started_at REAL,finished_at REAL,http_intervals_json TEXT);
         CREATE TABLE IF NOT EXISTS candidates(pair_id TEXT PRIMARY KEY,kind TEXT NOT NULL,left_id TEXT NOT NULL,right_id TEXT NOT NULL,similarity REAL NOT NULL,decision TEXT NOT NULL DEFAULT 'unjudged',audit TEXT);
         CREATE INDEX IF NOT EXISTS candidate_decisions ON candidates(decision,kind,pair_id);
         CREATE TABLE IF NOT EXISTS groups(group_id TEXT PRIMARY KEY,kind TEXT NOT NULL,members_json TEXT NOT NULL,name TEXT,description TEXT,review TEXT NOT NULL DEFAULT 'unreviewed',issues_json TEXT,audit TEXT,name_review TEXT NOT NULL DEFAULT 'unreviewed',name_audit TEXT);
@@ -105,6 +143,9 @@ class SnapshotGraph:
         CREATE TABLE IF NOT EXISTS tasks(task_id TEXT PRIMARY KEY,group_id TEXT UNIQUE NOT NULL, status TEXT NOT NULL,token TEXT,expires REAL,worker TEXT,attempts INTEGER NOT NULL DEFAULT 0,result_json TEXT,reason TEXT,queued_at REAL,claimed_at REAL);
         CREATE INDEX IF NOT EXISTS task_claim ON tasks(status,expires,task_id);
         ''')
+        columns={r[1] for r in self.db.execute('PRAGMA table_info(jev_requests)')}
+        for column, sqltype in (('started_at','REAL'),('finished_at','REAL'),('http_intervals_json','TEXT')):
+            if column not in columns:self.db.execute(f'ALTER TABLE jev_requests ADD COLUMN {column} {sqltype}')
         saved = self._meta('snapshot_hash')
         if saved and saved != self.snapshot['snapshot_hash']:
             raise ValueError('Graph job is bound to a different immutable snapshot')
@@ -150,14 +191,22 @@ class SnapshotGraph:
         for req in raw.get('requests',[]):
             rid=req.get('request_id')
             if not rid:continue
-            cursor=self.db.execute('INSERT OR IGNORE INTO jev_requests VALUES(?,?,?,?,?,?)',
+            cursor=self.db.execute('INSERT OR IGNORE INTO jev_requests VALUES(?,?,?,?,?,?,?,?,?)',
                         (rid,req.get('request_duration_s'),req.get('total_elapsed_s'),req.get('attempts'),
-                         req.get('model'),json.dumps(req.get('usage'))))
+                         req.get('model'),json.dumps(req.get('usage')),req.get('started_at'),req.get('finished_at'),
+                         json.dumps(req.get('http_intervals')) if req.get('http_intervals') is not None else None))
             if cursor.rowcount:
                 for stage,seconds in (('jev_api_request_seconds',req.get('request_duration_s') or 0),
                                       ('jev_api_elapsed_seconds',req.get('total_elapsed_s') or 0),
                                       ('jev_retry_count',max(0,(req.get('attempts') or 1)-1))):
                     self.db.execute('INSERT INTO stage VALUES(?,?) ON CONFLICT(name) DO UPDATE SET seconds=seconds+excluded.seconds',(stage,seconds))
+
+    def _record_failure(self, exc):
+        audits=getattr(exc,'request_audits',None)
+        if not isinstance(audits,list):audits=[getattr(exc,'request_audit',None)]
+        audits=[audit for audit in audits if isinstance(audit,dict) and audit.get('request_id')]
+        if audits:
+            with self.db:self._record_requests({'raw':{'requests':audits}})
 
     def _prepare_store(self):
         """Build a private master with the same validated records as the frozen snapshot."""
@@ -273,7 +322,10 @@ class SnapshotGraph:
                                      'paper_id':r['paper_id'],'version_id':r['version_id'],'title':r['title'],
                                      'source_url':r['source_url'],'source_hash':r['source_hash'],'source':json.loads(r['source_json'])}
                 inputs = [{'pair_id':r['pair_id'],'kind':r['kind'],'left':mentions[r['left_id']], 'right':mentions[r['right_id']]} for r in rows]
-                results = judge_pairs(inputs,self.client)
+                try:results = judge_pairs(inputs,self.client)
+                except Exception as exc:
+                    self._record_failure(exc)
+                    raise
                 mapping = {r['pair_id']:r for r in results}
                 if set(mapping) != {r['pair_id'] for r in rows} or len(results)!=len(mapping):
                     raise ValueError('Jev returned incomplete or duplicate pair judgments')
@@ -322,7 +374,10 @@ class SnapshotGraph:
                 groups.append(group)
             for start in range(0,len(groups),self.batch_size):
                 batch=groups[start:start+self.batch_size]
-                results=review_groups(batch,self.client)
+                try:results=review_groups(batch,self.client)
+                except Exception as exc:
+                    self._record_failure(exc)
+                    raise
                 mapping={r['group_id']:r for r in results}
                 if set(mapping)!={g['group_id'] for g in batch} or len(mapping)!=len(results):raise ValueError('Incomplete group review')
                 with self.db:
@@ -406,14 +461,29 @@ class SnapshotGraph:
         if self.namer is None and not (self.name_base_url and self.name_model):
             raise ValueError('API name mode needs name_base_url and name_model')
         namer = self.namer or OptionalLLMExtractor(self.name_base_url,self.name_model,enabled=True)
-        while True:
-            tasks=self.claim('api',self.batch_size)
-            if not tasks:break
-            submissions=[]
-            for task in tasks:
-                result=namer.generate_json('Name this coherent ResearchProblem group using supplied source evidence. Return JSON with name, description and group_id exactly matching the input.', {'group_id':task['group_id'],'members':task['members']}, required_keys=('name','description','group_id'))
-                submissions.append({**{k:task[k] for k in ('task_id','lease_token','input_hash')},'result':result})
-            self.submit(submissions)
+        prompt = 'Name this coherent ResearchProblem group using supplied source evidence. Return JSON with name, description and group_id exactly matching the input.'
+        # Claim and submit use the owning SQLite thread. Workers only call the HTTP namer.
+        with ThreadPoolExecutor(max_workers=self.name_concurrency) as pool:
+            while True:
+                tasks=self.claim('api',min(self.batch_size,self.name_concurrency))
+                if not tasks:break
+                futures={pool.submit(namer.generate_json,prompt,
+                    {'group_id':task['group_id'],'members':task['members']},
+                    required_keys=('name','description','group_id')):task for task in tasks}
+                failure=None
+                for future in as_completed(futures):
+                    task=futures[future]
+                    try:
+                        result=future.result()
+                        self.submit([{**{key:task[key] for key in ('task_id','lease_token','input_hash')},'result':result}])
+                    except BaseException as exc:
+                        if failure is None:failure=exc
+                        # Release only this call's own lease, so recovery does not wait
+                        # for the deadline and unrelated external leases are untouched.
+                        with self.db:
+                            self.db.execute("UPDATE tasks SET status='queued',token=NULL,expires=NULL,worker=NULL WHERE task_id=? AND status='leased' AND token=? AND worker='api'",
+                                            (task['task_id'],task['lease_token']))
+                if failure is not None:raise failure
 
     def _materialize(self):
         if self.db.execute("SELECT 1 FROM tasks WHERE status!='done' LIMIT 1").fetchone():return
@@ -458,7 +528,10 @@ class SnapshotGraph:
                         r=store.db.execute('SELECT name,description,source_json FROM mentions WHERE mention_id=?',(mid,)).fetchone()
                         members.append({'mention_id':mid,'name':r['name'],'description':r['description'],'source':json.loads(r['source_json'])})
                     inputs.append({'group_id':g['group_id'],'kind':g['kind'],'name':g['name'],'description':g['description'],'members':members})
-                results=review_groups(inputs,self.client)
+                try:results=review_groups(inputs,self.client)
+                except Exception as exc:
+                    self._record_failure(exc)
+                    raise
                 mapping={r['group_id']:r for r in results}
                 if len(mapping)!=len(results) or set(mapping)!={g['group_id'] for g in batch}:raise ValueError('Incomplete final name review')
                 with self.db:
@@ -536,6 +609,25 @@ class SnapshotGraph:
             store=SemanticStore(store_path)
             try:mention_counts={r['decision']:r['n'] for r in store.db.execute('SELECT decision,count(*) n FROM mentions GROUP BY decision')}
             finally:store.close()
+        intervals=[]
+        logical_intervals=[]
+        for row in self.db.execute('SELECT started_at,finished_at,http_intervals_json FROM jev_requests'):
+            if row[0] is not None and row[1] is not None and row[1]>=row[0]:
+                logical_intervals.append((row[0],row[1]))
+            if row[2]:
+                for item in json.loads(row[2]):
+                    a,b=item.get('started_at'),item.get('finished_at')
+                    if isinstance(a,(int,float)) and isinstance(b,(int,float)) and b>=a:
+                        intervals.append((a,b))
+        intervals.sort()
+        events=sorted([(a,1) for a,b in intervals]+[(b,-1) for a,b in intervals])
+        active=peak=0
+        union=0.0
+        previous=None
+        for instant,delta in events:
+            if previous is not None and active:union+=instant-previous
+            active+=delta;peak=max(peak,active);previous=instant
+        stats=getattr(self.client,'concurrency_stats',None)
         return {'phase':self._meta('phase'),'snapshot_hash':self._meta('snapshot_hash'),
                 'candidate_pairs':counts,'groups':groups,'name_tasks':tasks,'mentions':mention_counts,
                 'stage_seconds':{r['name']:r['seconds'] for r in self.db.execute('SELECT * FROM stage')},
@@ -545,6 +637,11 @@ class SnapshotGraph:
                 'completed_at':float(self._meta('completed_at')) if self._meta('completed_at') else None,
                 'elapsed_wall_seconds':(float(self._meta('completed_at') or time.time())-float(self._meta('started_at'))) if self._meta('started_at') else None,
                 'jev_request_count':self.db.execute('SELECT count(*) FROM jev_requests').fetchone()[0],
+                'jev_request_peak_concurrency':peak,
+                'jev_request_wall_union_seconds':union,
+                'jev_logical_request_intervals':len(logical_intervals),
+                'jev_http_attempt_intervals':len(intervals),
+                'jev_client_concurrency':stats if isinstance(stats,dict) else None,
                 'index_status':self._meta('index_status'),
                 'index_builds':int(self._meta('index_builds') or 0),'index_cache_hits':int(self._meta('index_cache_hits') or 0),
                 'index_embeddings_computed':int(self._meta('index_embeddings_computed') or 0)}

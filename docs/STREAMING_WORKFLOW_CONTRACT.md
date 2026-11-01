@@ -1,6 +1,6 @@
 # Streaming preparation and snapshot graph jobs
 
-This contract fixes the implementation boundary for the 2026-11-01 workflow step.
+This is the historical first streaming workflow contract. For new runs, [the parallel item workflow contract](PARALLEL_ITEM_WORKFLOW_CONTRACT.md) supersedes its paper-wide field gate and sequential dispatch; historical test results remain unchanged.
 
 ## Preparation
 

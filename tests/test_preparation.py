@@ -5,6 +5,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from kg_builder.preparation import PreparationWorkflow, snapshot_digest
 from kg_builder.extraction_validation import RETRIEVAL_SCHEMA_VERSION
 
@@ -34,7 +35,7 @@ def review(items,client,min_confidence):
 class PreparationTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
-        self.w=PreparationWorkflow(self.tmp.name,target=2,client=object(),scope_fn=scope,review_fn=review,embedding=Embedding(),lease_seconds=1)
+        self.w=PreparationWorkflow(self.tmp.name,target=2,client=object(),scope_fn=scope,review_fn=review,embedding=Embedding(),lease_seconds=1,review_policy='legacy-paper')
     def add(self,n):self.w.add_source(source(n),'arxiv','agent memory','agent_memory')
 
     def test_terminal_replay_preserves_first_completion_and_work(self):
@@ -121,7 +122,7 @@ class PreparationTests(unittest.TestCase):
             started.set();release.wait(4)
             yield source(4)
         w=PreparationWorkflow(self.tmp.name,target=2,client=object(),scope_fn=scope,review_fn=review,
-             embedding=Embedding(),collectors={'openalex':lambda *a:[],'arxiv':collecting},lease_seconds=1)
+             embedding=Embedding(),collectors={'openalex':lambda *a:[],'arxiv':collecting},lease_seconds=1,review_policy='legacy-paper')
         async def exercise():
             task=asyncio.create_task(w.run(poll_seconds=.02))
             for _ in range(100):
@@ -167,7 +168,7 @@ class PreparationTests(unittest.TestCase):
             i=QUERIES.index(query)
             return [source(200+i*20+j) for j in range(8)]
         w=PreparationWorkflow(Path(self.tmp.name)/'balanced',target=12,client=object(),scope_fn=scope,review_fn=review,
-             collectors={'openalex':alex,'arxiv':arxiv},embedding=Embedding())
+             collectors={'openalex':alex,'arxiv':arxiv},embedding=Embedding(),review_policy='legacy-paper')
         asyncio.run(w.collect())
         self.assertEqual(len(calls),6)
         self.assertEqual(sum(w.status()['papers'].values()),12)
@@ -226,5 +227,167 @@ class PreparationTests(unittest.TestCase):
             self.w._review_batch()
         self.assertEqual(self.w.status()['review']['pending'],1)
         self.assertNotIn('repair_extraction/queued',self.w.status()['tasks'])
+
+class ItemPolicyTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.results=[]
+        def review_items(items,client,min_confidence):
+            self.results.append([x['key'] for x in items])
+            return [dict(paper_id=x['paper_id'],field=x['field'],key=x['key'],input_hash=x['input_hash'],
+                passed=not x['key'].endswith('#bad') or len(self.results)>1,
+                confidence=.9,issues=['unsupported'] if x['key'].endswith('#bad') and len(self.results)==1 else [],raw={}) for x in items]
+        self.w=PreparationWorkflow(self.tmp.name,target=1,client=object(),scope_fn=scope,review_fn=review_items,embedding=Embedding())
+        self.w.add_source(source(50),'arxiv','agent memory','agent_memory');self.w._scope_batch()
+    def submit(self,task,payload):
+        return self.w.submit([dict(task_id=task['task_id'],lease_token=task['lease_token'],input_hash=task['input_hash'],result=payload)])
+    def test_keyed_repair_freezes_approved_and_partial_snapshot(self):
+        task=self.w.claim()[0];payload=draft(task)
+        payload['contributions'].append(dict(key=task['version_id']+'#bad',description='unsupported draft'))
+        self.submit(task,payload);self.w._review_batch()
+        repair=self.w.claim('repair_extraction')[0]
+        self.assertEqual([x['key'] for x in repair['requested_items']],[task['version_id']+'#bad'])
+        changed=draft(repair);changed['contributions']=[dict(key=task['version_id']+'#bad',description='repaired')]
+        self.submit(repair,changed);self.w._review_batch()
+        self.assertEqual(self.results[1],[task['version_id']+'#bad'])
+        db=self.w._db();row=db.execute('SELECT extraction_json,review_json FROM papers').fetchone();db.close()
+        extraction=json.loads(row[0]);self.assertEqual(len(extraction['contributions']),2)
+        self.assertIn(payload['contributions'][0],extraction['contributions'])
+        self.assertEqual(self.w.status()['review']['ready'],1)
+        db=self.w._db()
+        with db:db.execute("UPDATE run SET collection_state='sealed',completed=? WHERE id=1",(time.time(),))
+        db.close();snap=self.w.snapshot(Path(self.tmp.name)/'item.json')
+        self.assertEqual(snap['counts']['ready'],1)
+        self.assertEqual(len(snap['review_metadata'][task['paper_id']]['items']),2)
+
+    def test_empty_is_terminal(self):
+        task=self.w.claim()[0];payload=draft(task);payload['contributions']=[]
+        self.submit(task,payload);self.w._review_batch()
+        self.assertEqual(self.w.status()['review']['no_usable_items'],1)
+        self.assertFalse(self.w.claim('repair_extraction'))
+        db=self.w._db()
+        with db:db.execute("UPDATE run SET collection_state='sealed',completed=? WHERE id=1",(time.time(),))
+        db.close();snapshot=self.w.snapshot(Path(self.tmp.name)/'empty.json')
+        self.assertEqual(snapshot['counts'],dict(collected=1,ready=0,excluded=0,pending=0,no_usable_items=1))
+
+    def test_wrong_review_hash_does_not_approve(self):
+        task=self.w.claim()[0];self.submit(task,draft(task))
+        self.w.review_fn=lambda items,client,min_confidence:[dict(paper_id=x['paper_id'],field=x['field'],key=x['key'],
+            input_hash='wrong',passed=True,confidence=.99,issues=[],raw={}) for x in items]
+        with self.assertRaisesRegex(ValueError,'hash'):self.w._review_batch()
+        self.assertEqual(self.w.status()['review']['queued'],1)
+        db=self.w._db();self.assertEqual(db.execute("SELECT count(*) FROM item_reviews WHERE state='approved'").fetchone()[0],0);db.close()
+
+    def test_source_change_revokes_approval(self):
+        task=self.w.claim()[0];self.submit(task,draft(task));self.w._review_batch()
+        changed=source(50);changed['abstract']='Changed primary source'
+        self.w.add_source(changed,'arxiv','agent memory','agent_memory')
+        self.assertEqual(self.w.status()['review']['pending'],1)
+        db=self.w._db();row=db.execute('SELECT state,approved_json FROM item_reviews').fetchone();db.close()
+        self.assertEqual(row['state'],'revoked');self.assertIsNone(row['approved_json'])
+
+    def test_jev_stats_survive_reopen_and_terminal_replay(self):
+        task=self.w.claim()[0];self.submit(task,draft(task));self.w._review_batch()
+        class Measured:
+            concurrency_stats=dict(active=0,peak_active=4,started=9,finished=9,queued=0,
+                peak_queued=2,cumulative_request_duration_s=4.5,request_wall_union_s=1.7)
+        self.w.client=Measured()
+        db=self.w._db()
+        with db:db.execute("UPDATE run SET collection_state='sealed' WHERE id=1")
+        db.close()
+        self.assertEqual(asyncio.run(self.w.run(collect=False))['jev_concurrency']['peak_active'],4)
+        reopened=PreparationWorkflow(self.tmp.name)
+        self.assertEqual(reopened.status()['jev_concurrency']['peak_active'],4)
+        self.assertEqual(asyncio.run(reopened.run(collect=False))['jev_concurrency']['peak_active'],4)
+        db=reopened._db();self.assertEqual(json.loads(db.execute('SELECT jev_stats_json FROM run').fetchone()[0])['started'],9);db.close()
+
+    def test_parallel_scope_claims_overlap_without_duplicates(self):
+        self.w.add_source(source(51),'arxiv','agent memory','agent_memory')
+        barrier=threading.Barrier(2,timeout=3);seen=[]
+        def concurrent(items,client,min_confidence):
+            seen.extend(x['paper_id'] for x in items)
+            barrier.wait()
+            return scope(items,client,min_confidence)
+        self.w.scope_fn=concurrent;self.w.config['batch_size']=1
+        # First source was scoped during setUp; queue it again for this claim race.
+        db=self.w._db()
+        with db:db.execute("UPDATE papers SET scope_state='queued' WHERE paper_id=(SELECT paper_id FROM papers ORDER BY discovered LIMIT 1)")
+        db.close()
+        errors=[]
+        def work():
+            try:self.w._scope_batch()
+            except BaseException as exc:errors.append(exc)
+        threads=[threading.Thread(target=work) for _ in range(2)]
+        for t in threads:t.start()
+        for t in threads:t.join(5)
+        self.assertFalse(errors,errors);self.assertEqual(len(seen),2)
+        self.assertEqual(len(set(seen)),2)
+
+    def test_parallel_api_extractors_share_claim_validator(self):
+        self.w.add_source(source(51),'arxiv','agent memory','agent_memory');self.w._scope_batch()
+        barrier=threading.Barrier(2,timeout=3);seen=[]
+        class Extractor:
+            model='fake'
+            def extract_draft(self,pid,vid,text,paper_version):
+                seen.append(pid);barrier.wait()
+                return draft(dict(paper_id=pid,version_id=vid,paper_version=paper_version))
+        self.w.extractor=Extractor();self.w.config['batch_size']=1
+        errors=[]
+        def work():
+            try:self.w._api_extract()
+            except BaseException as exc:errors.append(exc)
+        workers=[threading.Thread(target=work) for _ in range(2)]
+        for t in workers:t.start()
+        for t in workers:t.join(5)
+        self.assertFalse(errors,errors)
+        self.assertEqual(len(set(seen)),2)
+        self.assertEqual(self.w.status()['tasks']['extract/done'],2)
+
+    def test_concurrent_identical_submission_is_accepted_then_duplicate(self):
+        task=self.w.claim()[0]
+        entry=dict(task_id=task['task_id'],lease_token=task['lease_token'],input_hash=task['input_hash'],result=draft(task))
+        barrier=threading.Barrier(2,timeout=3);results=[];errors=[]
+        def submit():
+            try:
+                barrier.wait();results.append(self.w.submit([entry])[0]['status'])
+            except BaseException as exc:errors.append(exc)
+        workers=[threading.Thread(target=submit) for _ in range(2)]
+        for t in workers:t.start()
+        for t in workers:t.join(5)
+        self.assertFalse(errors,errors)
+        self.assertEqual(sorted(results),['accepted','duplicate'])
+
+    def test_plural_error_audits_and_diagnostic_failure_are_retained(self):
+        task=self.w.claim()[0];self.submit(task,draft(task))
+        class APIError(RuntimeError):pass
+        def fail(items,client,min_confidence):
+            exc=APIError('temporary');exc.request_audits=[{'request_id':'a','request_duration_s':.1},{'request_id':'b','request_duration_s':.2}]
+            raise exc
+        self.w.review_fn=fail
+        with self.assertRaises(APIError):self.w._review_batch()
+        db=self.w._db();error=json.loads(db.execute("SELECT payload_json FROM decision_audits WHERE stage='item_review_error'").fetchone()[0]);db.close()
+        self.assertEqual([x['request_id'] for x in error['requests']],['a','b'])
+        self.w.review_fn=None
+        def success(items,client,min_confidence):
+            return [dict(paper_id=x['paper_id'],field=x['field'],key=x['key'],input_hash=x['input_hash'],passed=True,confidence=.9,issues=[],raw={}) for x in items]
+        with patch('kg_builder.decision_api.review_items',side_effect=success),patch('kg_builder.decision_api.review_completeness',side_effect=fail):
+            self.w._review_batch()
+        db=self.w._db();diagnostic=json.loads(db.execute("SELECT payload_json FROM decision_audits WHERE stage='completeness'").fetchone()[0]);db.close()
+        self.assertEqual([x['request_id'] for x in diagnostic['requests']],['a','b'])
+        self.assertIsNone(diagnostic['completeness']['methods']['passed'])
+
+    def test_failed_second_review_drops_only_item(self):
+        self.w.review_fn=lambda items,client,min_confidence:[dict(paper_id=x['paper_id'],field=x['field'],key=x['key'],input_hash=x['input_hash'],
+              passed=not x['key'].endswith('#bad'),confidence=.9,issues=['unsupported'],raw={}) for x in items]
+        task=self.w.claim()[0];payload=draft(task)
+        payload['contributions'].append(dict(key=task['version_id']+'#bad',description='unsupported'))
+        self.submit(task,payload);self.w._review_batch()
+        repair=self.w.claim('repair_extraction')[0]
+        changed=draft(repair);changed['contributions']=[payload['contributions'][-1]]
+        self.submit(repair,changed);self.w._review_batch()
+        self.assertEqual(self.w.status()['review']['ready'],1)
+        db=self.w._db();row=db.execute('SELECT extraction_json,review_json FROM papers').fetchone();db.close()
+        self.assertEqual([x['key'] for x in json.loads(row[0])['contributions']],[task['version_id']+'#c1'])
+        self.assertEqual({x['key']:x['state'] for x in json.loads(row[1])['items']}[task['version_id']+'#bad'],'dropped')
 
 if __name__=='__main__':unittest.main()
