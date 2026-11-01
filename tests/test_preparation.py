@@ -36,6 +36,36 @@ class PreparationTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.w=PreparationWorkflow(self.tmp.name,target=2,client=object(),scope_fn=scope,review_fn=review,embedding=Embedding(),lease_seconds=1)
     def add(self,n):self.w.add_source(source(n),'arxiv','agent memory','agent_memory')
+
+    def test_claim_locality_ignores_completed_same_kind_tasks(self):
+        self.add(9);self.w._scope_batch()
+        db=self.w._db()
+        original_db=self.w._db
+        ticks=[0]
+        def counted_db():
+            con=original_db()
+            def progress():ticks[0]+=1;return 0
+            con.set_progress_handler(progress,1)
+            return con
+        self.w._db=counted_db
+        def measured():
+            db.execute("UPDATE tasks SET state='queued',lease_until=NULL WHERE attempt=0")
+            db.commit()
+            ticks[0]=0
+            result=self.w.claim('extract',1,'locality')
+            self.assertEqual(len(result),1)
+            return ticks[0]
+        baseline=measured()
+        paper=db.execute('SELECT paper_id,fingerprint FROM papers LIMIT 1').fetchone()
+        now=time.time()
+        db.executemany('''INSERT INTO tasks(task_id,paper_id,kind,state,fingerprint,attempt,created,result_json)
+            VALUES(?,?, 'extract','done',?,?,?,?)''',
+            [(f'done-{i}',paper['paper_id'],paper['fingerprint'],i+1,now+i,'x'*10000) for i in range(1000)])
+        db.commit()
+        inflated=measured()
+        db.close()
+        self.assertGreater(baseline,0)
+        self.assertLess(inflated-baseline,200,(baseline,inflated))
     def test_claim_duplicate_stale_source_and_repair(self):
         self.add(1);self.w._scope_batch()
         a,b=[],[]
@@ -77,8 +107,13 @@ class PreparationTests(unittest.TestCase):
             self.assertEqual(len(first),1)
             self.assertEqual(sum(w.status()['papers'].values()),1)
             w.submit([dict(task_id=first[0]['task_id'],lease_token=first[0]['lease_token'],input_hash=first[0]['input_hash'],result=draft(first[0]))])
-            release.set()
             for _ in range(100):
+                if w.status()['review'].get('ready'):break
+                await asyncio.sleep(.02)
+            self.assertEqual(w.status()['review'].get('ready'),1)
+            self.assertEqual(w.status()['collection_state'],'open')
+            release.set()
+            for _ in range(400):
                 second=w.claim('extract',1,'worker')
                 if second:break
                 await asyncio.sleep(.02)

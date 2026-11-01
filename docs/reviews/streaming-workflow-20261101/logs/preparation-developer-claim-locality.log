@@ -1,0 +1,6 @@
+queued plan [(7, 0, 61, 'SEARCH t USING INDEX idx_tasks_queued (kind=?)'), (14, 0, 46, 'SEARCH p USING INDEX sqlite_autoindex_papers_1 (paper_id=?)')]
+expired plan [(7, 0, 49, 'SEARCH t USING INDEX idx_tasks_claim (kind=? AND state=? AND lease_until<?)'), (19, 0, 46, 'SEARCH p USING INDEX sqlite_autoindex_papers_1 (paper_id=?)'), (38, 0, 0, 'USE TEMP B-TREE FOR ORDER BY')]
+done rows 0 VM instructions 0 returned 1 source_bytes 43
+done rows 1000 VM instructions 0 returned 1 source_bytes 43
+actual claim, done rows 0 VM instructions 341 returned 1 source_bytes 43
+actual claim, done rows 1000 VM instructions 370 returned 1 source_bytes 43

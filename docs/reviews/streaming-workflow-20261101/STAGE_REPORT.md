@@ -50,3 +50,23 @@
 数据准备新增append-only decision_audits，保留scope及每轮字段复核完整结果与失败API审计；恢复成功清除暂时API错误但保留采集不足错误。开发者6项定向、84项全仓通过。建图空快照可完成而无需模型；wall终点移到索引成功之后，开发者5项定向、83项当时全仓通过。均尚未提交。
 
 主Agent独立synthetic跨组件探针通过：公开run/claim/submit六源查询流转，6篇新提取、重复提交、24个paper限定vector、独立图任务6个外部名称、冷索引查询、graph-master原文保留及prep-master不被建图修改。日志root-integration-prefreeze.log。此探针使用fake Jev/embedding，不冒充真实60篇验收。
+
+## 正式独立review第1轮 — 需要修正
+
+固定远端head：248600395ebd927be4bd8562ba1de649b4500d11；base：ffdff5cd09b789072bc0fc46f13c9ebf87f7e2f7；main目标未变。远端tree10878a75f08fb910f037805bf8b802b84ce893b3与本地候选一致，已取回核验。主Agent未修改生产实现，独立审阅完整batch差异与契约。
+
+独立验证：固定head全仓84项通过（6.904秒），review-r1-full.log；六篇synthetic公开流水线到独立图任务、索引与源库隔离探针通过，review-r1-integration.log；真实Jev双条目绑定先前已验证，不作为本轮fake测试数量重复计算。
+
+确认SFW-05（P2，新引入，本step数据准备组件）：claim队列的OR条件只使用idx_tasks_claim(kind=?)，扫描同kind已完成历史。固定1个可领取任务时，增加1000个无关done任务后SQLite VM从108增至7074，输出仍1行58B；EXPLAIN显示kind前缀扫描和临时排序。已知task详情使用task PK+paper PK，不受此问题影响。证据review-r1-locality.log。根因为kind前缀加OR未定位活跃状态，不能用“EXPLAIN有INDEX”代替实际局部性。修正方案：queued与expired-leased分支各自限定状态/索引，先合并并限制任务ID，再读取详细source；保留CAS租约及顺序、fingerprint行为。增加同kind大量done任务反例，并重跑定向/全仓；之后第2轮复审同一问题。当前未开始真实60篇，旧数据不受影响。
+
+## 第1轮后修正开发总结（尚未再次提交）
+
+SFW-05：queue按queued／expired-leased分支定位活跃ID，再取限定任务详情；BEGIN IMMEDIATE与CAS保留。开发者7项定向、85项当时全仓通过。主Agent实际claim入口独立测得：加入1000条同kind已完成10KB任务，VM341→370，输出仍1条约510B；queued使用partial index，expired使用kind/state/lease_until范围，fix-root-locality-probe.log。曾发现开发者新增进度计数挂在非claim连接上而返回0；已明确纠正为实际连接工厂并要求baseline>0，保留原失败测量历史，不冒充通过。
+
+SFW-06（P2，本step建图恢复边界）已修正：同字节快照下载／复制导致mtime变化时，先核验完整digest与file hash，再更新stat缓存；原先会错误拒绝恢复。变更字节继续拒绝。开发者6项定向通过。尚待固定修正提交后第2轮独立复审。
+
+另对开发者提到的synthetic并发SQLITE_BUSY_SNAPSHOT作有限诊断，要求保留采集期间提交／复核覆盖；未将尚未定位的疑点计作已确认生产缺陷。
+
+## 并发写入诊断及修正完成
+
+SFW-07确认为P2、本step数据准备集成引入：collector.upsert_paper与字段复核ingest_extractions在master.sqlite3并发写入，复核读pin后SAVEPOINT升级写锁可能发生SQLITE_BUSY_SNAPSHOT；claim的workflow.sqlite3锁不能解决master写入。修正是在本step _review_batch对master先BEGIN IMMEDIATE，再读pin与ingest，未修改既有storage.py。恢复采集未结束前提交的原测试，并明确断言首篇ready时collection仍open，随后才释放producer。开发者重复5轮、定向7项、全仓86项通过。日志preparation-developer-streaming-repeat/targeted/full。撤销等待collectionsealed以避开冲突的测试改法；不把该改法当作有效修复。

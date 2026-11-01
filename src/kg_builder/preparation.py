@@ -69,6 +69,8 @@ class PreparationWorkflow:
             worker TEXT,created REAL NOT NULL,claimed REAL,finished REAL,result_hash TEXT,
             result_json TEXT,reason TEXT,UNIQUE(paper_id,kind,attempt));
           CREATE INDEX IF NOT EXISTS idx_tasks_claim ON tasks(kind,state,lease_until,created);
+          CREATE INDEX IF NOT EXISTS idx_tasks_queued ON tasks(kind,created) WHERE state='queued';
+          CREATE INDEX IF NOT EXISTS idx_tasks_expired ON tasks(kind,lease_until,created) WHERE state='leased';
           CREATE INDEX IF NOT EXISTS idx_tasks_paper ON tasks(paper_id,state);
           CREATE TABLE IF NOT EXISTS decision_audits (id INTEGER PRIMARY KEY AUTOINCREMENT,
             paper_id TEXT NOT NULL,stage TEXT NOT NULL,attempt INTEGER NOT NULL,
@@ -264,11 +266,23 @@ class PreparationWorkflow:
         db=self._db();now=time.time();out=[]
         try:
             with db:
-                rows=db.execute('''SELECT t.*,p.title,p.text,p.version_id,p.version_label,p.source_url,p.review_json,p.extraction_json
-                    FROM tasks t JOIN papers p ON p.paper_id=t.paper_id AND p.fingerprint=t.fingerprint
-                    WHERE t.kind=? AND (t.state='queued' OR (t.state='leased' AND t.lease_until<?))
+                db.execute('BEGIN IMMEDIATE')
+                # Each branch uses its state-specific index. Completed tasks never enter either walk.
+                queued=db.execute('''SELECT t.task_id,t.created FROM tasks t
+                    JOIN papers p ON p.paper_id=t.paper_id AND p.fingerprint=t.fingerprint
+                    WHERE t.kind=? AND t.state='queued' ORDER BY t.created LIMIT ?''',
+                    (kind,limit)).fetchall()
+                expired=db.execute('''SELECT t.task_id,t.created FROM tasks t
+                    JOIN papers p ON p.paper_id=t.paper_id AND p.fingerprint=t.fingerprint
+                    WHERE t.kind=? AND t.state='leased' AND t.lease_until<?
                     ORDER BY t.created LIMIT ?''',(kind,now,limit)).fetchall()
-                for r in rows:
+                selected=sorted([*queued,*expired],key=lambda row:row['created'])[:limit]
+                for candidate in selected:
+                    r=db.execute('''SELECT t.*,p.title,p.text,p.version_id,p.version_label,p.source_url,
+                        p.review_json,p.extraction_json FROM tasks t JOIN papers p
+                        ON p.paper_id=t.paper_id AND p.fingerprint=t.fingerprint
+                        WHERE t.task_id=?''',(candidate['task_id'],)).fetchone()
+                    if r is None:continue
                     token=secrets.token_urlsafe(32)
                     cur=db.execute('''UPDATE tasks SET state='leased',lease_token=?,lease_until=?,worker=?,claimed=?
                       WHERE task_id=? AND (state='queued' OR (state='leased' AND lease_until<?))''',
@@ -364,6 +378,7 @@ class PreparationWorkflow:
                     con=source_connect(self.master)
                     try:
                         # Source must still match frozen data; conflicting collector refreshes cannot approve.
+                        con.execute('BEGIN IMMEDIATE')
                         ver=con.execute('SELECT source_url,abstract,version_label FROM paper_versions WHERE version_id=?',(r['version_id'],)).fetchone()
                         if not ver or (ver[0],ver[1],ver[2])!=(r['source_url'],r['text'],r['version_label']):
                             passed=False;o=dict(passed=False,issues=['source_changed'],raw=o)

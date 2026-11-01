@@ -121,8 +121,10 @@ class SnapshotGraph:
                 self._set_meta('k', str(k))
                 self._set_meta('name_mode', name_mode)
         elif self._meta('snapshot_stat') != stamp:
-            raise ValueError('Frozen snapshot file metadata changed')
-        elif int(self._meta('k')) != k or self._meta('name_mode') != name_mode:
+            # The full file was read above and both canonical and byte digests matched.
+            # A restored copy can have a new path/mtime without changing the input.
+            with self.db:self._set_meta('snapshot_stat',stamp)
+        if saved and (int(self._meta('k')) != k or self._meta('name_mode') != name_mode):
             raise ValueError('Graph job configuration changed')
 
     def close(self):

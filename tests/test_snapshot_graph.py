@@ -97,6 +97,28 @@ class SnapshotGraphTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'digest mismatch'):
                 SnapshotGraph(source,root/'job')
 
+    def test_restored_snapshot_path_and_timestamp_accept_same_bytes_only(self):
+        import os
+        import shutil
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'snapshot.json';fixture(source)
+            job=SnapshotGraph(source,root/'job',client=object(),k=1,model=FakeEmbedding())
+            job.close()
+            restored=root/'restored.json'
+            shutil.copyfile(source,restored)
+            stat=restored.stat()
+            os.utime(restored,ns=(stat.st_atime_ns,stat.st_mtime_ns+123456789))
+            job=SnapshotGraph(restored,root/'job',k=1,read_input=False)
+            self.assertEqual(job.status()['phase'],'new')
+            job.close()
+            # Changed bytes with a valid newly computed canonical digest remain a different job input.
+            value=json.loads(restored.read_text())
+            value['run_id']='altered'
+            value['snapshot_hash']=canonical_hash({k:v for k,v in value.items() if k!='snapshot_hash'})
+            restored.write_text(json.dumps(value),encoding='utf-8')
+            with self.assertRaisesRegex(ValueError,'different immutable snapshot'):
+                SnapshotGraph(restored,root/'job',k=1,read_input=False)
+
     def test_coherence_failure_preserves_pending_and_source_fingerprint(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);source=root/'snapshot.json';value=fixture(source)

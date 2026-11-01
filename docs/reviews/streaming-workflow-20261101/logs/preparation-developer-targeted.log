@@ -1,11 +1,12 @@
 test_append_only_audit_and_recovered_transient_error (tests.test_preparation.PreparationTests.test_append_only_audit_and_recovered_transient_error) ... ok
 test_balanced_sources_topics_and_resume_without_refetch (tests.test_preparation.PreparationTests.test_balanced_sources_topics_and_resume_without_refetch) ... ok
 test_claim_duplicate_stale_source_and_repair (tests.test_preparation.PreparationTests.test_claim_duplicate_stale_source_and_repair) ... ok
+test_claim_locality_ignores_completed_same_kind_tasks (tests.test_preparation.PreparationTests.test_claim_locality_ignores_completed_same_kind_tasks) ... ok
 test_repair_limit_and_expired_lease (tests.test_preparation.PreparationTests.test_repair_limit_and_expired_lease) ... ok
 test_shortfall_and_stop_before_loop (tests.test_preparation.PreparationTests.test_shortfall_and_stop_before_loop) ... ok
 test_streaming_snapshot_and_restart (tests.test_preparation.PreparationTests.test_streaming_snapshot_and_restart) ... ok
 
 ----------------------------------------------------------------------
-Ran 6 tests in 2.488s
+Ran 7 tests in 3.069s
 
 OK
