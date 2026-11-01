@@ -225,7 +225,7 @@ def _run(items, client, make, consume):
         for index, item in enumerate(batch):
             for suffix, q in make(item).items():
                 targeted = dict(q)
-                identity = item.get('paper_id', item.get('pair_id', item.get('group_id')))
+                identity = item.get('paper_id', item.get('pair_id', item.get('membership_id', item.get('group_id'))))
                 targeted['instructions'] = (f'For state.items[{index}] (ID {json.dumps(identity, ensure_ascii=False)}), '
                                             + q['instructions'].replace('state.items[INDEX]', f'state.items[{index}]'))
                 questions[f'i{index}_{suffix}'] = targeted
@@ -256,7 +256,7 @@ def _run(items, client, make, consume):
                 raise ValueError('Malformed decision client response')
             return dict(raw, request_id=raw.get('request_id') or str(uuid.uuid4()))
         except Exception as exc:
-            exc.decision_item_ids = [item.get('paper_id', item.get('pair_id', item.get('group_id')))
+            exc.decision_item_ids = [item.get('paper_id', item.get('pair_id', item.get('membership_id', item.get('group_id'))))
                                      for item in state['items']]
             exc.decision_question_ids = list(chunk)
             if not hasattr(exc, 'request_audit'):
@@ -459,3 +459,43 @@ def review_groups(groups, client, min_confidence=0.7):
         return {'group_id': item['group_id'], 'passed': passed,
                 'issues': [] if passed else [answer['choice'] if answer['confidence'] >= min_confidence else 'low confidence'], 'raw': raw}
     return _run(list(groups), client, make, consume)
+
+
+def review_group_members(items, client, rejection_threshold=0.7):
+    """Audit each candidate member; only a confident negative excludes it."""
+    _threshold(rejection_threshold)
+    items=list(items)
+    ids=[]
+    for item in items:
+        if not isinstance(item,dict) or item.get('kind') not in ('ResearchArea','Method','Benchmark') or any(
+            not isinstance(item.get(key),str) or not item[key].strip()
+            for key in ('membership_id','group_id','name','description')):
+            raise ValueError('Invalid group membership review item')
+        member=item.get('member')
+        if not isinstance(member,dict) or any(
+            not isinstance(member.get(key),str) or not member[key].strip()
+            for key in ('mention_id','name','description')) or not isinstance(member.get('source'),dict):
+            raise ValueError('Invalid member source')
+        ids.append(item['membership_id'])
+    if len(ids)!=len(set(ids)):raise ValueError('Duplicate membership ID')
+    def make(item):
+        if item['kind']=='ResearchArea':
+            question=('Does state.items[INDEX].member belong to the thematic research area described by '
+                      'state.items[INDEX].name and state.items[INDEX].description? Related distinct research '
+                      'problems may belong to one area; do not require identical concrete objectives. '
+                      'Use the member description and source evidence.')
+        else:
+            question=('Does state.items[INDEX].member denote the same actual method or benchmark identity '
+                      'as state.items[INDEX].name and state.items[INDEX].description, using its source '
+                      'description and metadata? Shared words alone do not establish identity.')
+        return {'membership':_choice(question,{'belongs':'Member belongs to this group',
+            'not_belongs':'Member clearly does not belong to this group',
+            'insufficient':'Evidence cannot resolve membership'})}
+    def consume(item, answers, raw):
+        answer=answers['membership']
+        choice=answer['choice'];confidence=answer['confidence']
+        if choice not in ('belongs','not_belongs','insufficient') or not _valid_probability(confidence):
+            raise ValueError('Malformed member review answer')
+        return {'membership_id':item['membership_id'],'excluded':choice=='not_belongs' and
+                confidence>rejection_threshold,'choice':choice,'confidence':confidence,'raw':raw}
+    return _run(items,client,make,consume)

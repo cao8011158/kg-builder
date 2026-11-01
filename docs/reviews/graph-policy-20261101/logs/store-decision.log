@@ -1,0 +1,20 @@
+test_batches_bounded (test_decision_api.DecisionTests.test_batches_bounded) ... ok
+test_concurrent_failure_retains_completed_request_audits (test_decision_api.DecisionTests.test_concurrent_failure_retains_completed_request_audits) ... ok
+test_dispatch_out_of_order_keeps_source_binding (test_decision_api.DecisionTests.test_dispatch_out_of_order_keeps_source_binding) ... ok
+test_every_question_targets_its_own_item_and_field (test_decision_api.DecisionTests.test_every_question_targets_its_own_item_and_field) ... ok
+test_item_results_and_diagnostic_completeness (test_decision_api.DecisionTests.test_item_results_and_diagnostic_completeness) ... ok
+test_long_field_review_splits_questions (test_decision_api.DecisionTests.test_long_field_review_splits_questions) ... ok
+test_member_review_strict_boundary_and_audit (test_decision_api.DecisionTests.test_member_review_strict_boundary_and_audit) ... ok
+test_native_request_and_audit (test_decision_api.DecisionTests.test_native_request_and_audit) ... ok
+test_pair_and_group_semantics (test_decision_api.DecisionTests.test_pair_and_group_semantics) ... ok
+test_queue_time_excluded_from_http_duration (test_decision_api.DecisionTests.test_queue_time_excluded_from_http_duration) ... ok
+test_reject_malformed_answers (test_decision_api.DecisionTests.test_reject_malformed_answers) ... ok
+test_retry_is_bounded_and_audited (test_decision_api.DecisionTests.test_retry_is_bounded_and_audited) ... ok
+test_scope_and_reviews (test_decision_api.DecisionTests.test_scope_and_reviews) ... ok
+test_shared_audit_request_id_and_adaptive_payload_batch (test_decision_api.DecisionTests.test_shared_audit_request_id_and_adaptive_payload_batch) ... ok
+test_shared_http_budget_and_per_thread_audit (test_decision_api.DecisionTests.test_shared_http_budget_and_per_thread_audit) ... ok
+
+----------------------------------------------------------------------
+Ran 15 tests in 0.092s
+
+OK

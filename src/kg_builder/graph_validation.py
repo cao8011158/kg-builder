@@ -148,6 +148,9 @@ def validate_graph(snapshot_path, job_dir, cases=None, model=None):
         for eid,key in expected_contributions.keys()-contribution_keys:fail('missing_contribution',extraction_id=eid,key=key)
         entities={r['entity_id']:r for r in store.execute('SELECT * FROM entities')}
         groups={r['group_id']:r for r in graph.execute('SELECT * FROM groups')}
+        if meta.get('graph_policy') == 'domain-v1':
+            return _domain_validation(snapshot,job_dir,cases,model,graph,store,meta,mentions,
+                                      contributions,entities,groups,approved,sources,fail,failures,details)
         accepted_members=defaultdict(set)
         for gid,group in groups.items():
             mids=json.loads(group['members_json'])
@@ -234,14 +237,206 @@ def validate_graph(snapshot_path, job_dir, cases=None, model=None):
         graph.close();store.close();master.close()
 
 
-def _quality(cases, source_db, job_dir, model, mentions, contributions, fail):
+def _domain_validation(snapshot, job_dir, cases, model, graph, store, meta, mentions,
+                       contributions, entities, groups, approved, sources, fail, failures, details):
+    """Audit the domain policy's immutable proposals and final retained relationships."""
+    group_members = Counter()
+    expected_entities = {}
+    expected_assignment = {}
+    expected_areas = {}
+    expected_memberships = set()
+    excluded_count = 0
+    reviews = {}
+    parsed_groups = {}
+    for row in graph.execute('SELECT * FROM member_reviews'):
+        key = row['group_id'], row['mention_id']
+        if key in reviews: fail('duplicate_member_review', group_id=key[0], mention_id=key[1])
+        reviews[key] = row
+    for gid, group in groups.items():
+        try: mids = json.loads(group['members_json'])
+        except (ValueError, TypeError):
+            fail('invalid_group_members',group_id=gid);continue
+        if not isinstance(mids,list) or not mids or not all(isinstance(mid,str) for mid in mids):
+            fail('invalid_group_members',group_id=gid);continue
+        parsed_groups[gid]=mids
+        if mids!=sorted(set(mids)) or gid!='group:'+digest(mids)[:32]:
+            fail('invalid_group_members',group_id=gid)
+        if group['kind'] not in KINDS.values() or group['review']!='accepted':
+            fail('invalid_group_status',group_id=gid,review=group['review'])
+        kept=[]
+        for mid in mids:
+            group_members[mid]+=1
+            mention=mentions.get(mid)
+            if mention is None or mention['kind']!=group['kind']:
+                fail('dangling_or_cross_kind_group_member',group_id=gid,mention_id=mid);continue
+            if group['kind']=='ResearchProblem' and len(mids)==1:
+                if (gid,mid) in reviews:fail('unexpected_singleton_area_review',group_id=gid,mention_id=mid)
+                kept.append(mid)
+                continue
+            row=reviews.get((gid,mid))
+            if row is None:
+                fail('missing_member_review',group_id=gid,mention_id=mid);continue
+            try: audit=json.loads(row['audit'])
+            except (ValueError,TypeError):
+                fail('invalid_member_audit',group_id=gid,mention_id=mid);continue
+            if not isinstance(audit,dict):
+                fail('invalid_member_audit',group_id=gid,mention_id=mid);continue
+            confidence=audit.get('confidence')
+            choice=audit.get('choice')
+            expected_excluded=(choice=='not_belongs' and isinstance(confidence,(int,float))
+                               and not isinstance(confidence,bool) and 0 <= confidence <= 1 and confidence>0.7)
+            if (audit.get('membership_id')!='membership:'+digest([gid,mid])[:32]
+                or audit.get('excluded') is not expected_excluded or row['excluded'] not in (0,1)
+                or bool(row['excluded'])!=expected_excluded or choice not in ('belongs','not_belongs','insufficient')
+                or not isinstance(confidence,(int,float)) or isinstance(confidence,bool) or not 0<=confidence<=1
+                or (group['kind']=='ResearchProblem' and audit.get('area_revision')!=digest([group['name'],group['description']]))
+                or not isinstance(audit.get('raw'),dict)):
+                fail('member_exclusion_evidence',group_id=gid,mention_id=mid)
+            if row['excluded']:excluded_count+=1
+            else:kept.append(mid)
+        if group['kind']=='ResearchProblem':
+            if len(mids)>1:
+                task=graph.execute('SELECT status,result_json FROM tasks WHERE group_id=?',(gid,)).fetchone()
+                try:result=json.loads(task['result_json']) if task and task['status']=='done' else None
+                except (ValueError,TypeError):result=None
+                if not isinstance(result,dict) or result.get('name')!=group['name'] or result.get('description')!=group['description'] or result.get('group_id',gid)!=gid:
+                    fail('area_name_task',group_id=gid)
+            if len(mids)>1 and kept:
+                area_id='area:'+digest([gid])[:32]
+                expected_areas[area_id]=group
+                expected_memberships.update((area_id,mid) for mid in kept)
+            continue
+        if kept:
+            eid='entity:'+digest([group['kind'],sorted(kept)])[:32]
+            if eid in expected_entities:fail('duplicate_expected_entity',entity_id=eid)
+            expected_entities[eid]=(group['kind'],sorted(kept))
+            for mid in kept:
+                if mid in expected_assignment:fail('duplicate_expected_assignment',mention_id=mid)
+                expected_assignment[mid]=eid
+        for mid in set(mids)-set(kept):
+            eid='entity:'+digest([group['kind'],[mid]])[:32]
+            if eid in expected_entities:fail('duplicate_expected_entity',entity_id=eid)
+            expected_entities[eid]=(group['kind'],[mid])
+            if mid in expected_assignment:fail('duplicate_expected_assignment',mention_id=mid)
+            expected_assignment[mid]=eid
+    for key in reviews.keys()-{(gid,mid) for gid,mids in parsed_groups.items() for mid in mids}:
+        fail('extra_member_review',group_id=key[0],mention_id=key[1])
+    for mid,row in mentions.items():
+        if group_members[mid]!=1:fail('group_membership_count',mention_id=mid,count=group_members[mid])
+        if row['kind']=='ResearchProblem':
+            eid='entity:'+digest(['ResearchProblem',[mid]])[:32]
+            expected_entities[eid]=('ResearchProblem',[mid])
+            expected_assignment[mid]=eid
+        else:
+            eid=expected_assignment.get(mid)
+        if row['entity_id']!=eid or row['decision']!='new_entity':
+            fail('mention_entity_assignment',mention_id=mid,entity_id=row['entity_id'],expected=eid)
+        if row['extraction_id'] not in sources:
+            fail('dangling_mention_source',mention_id=mid)
+    if entities.keys()!=expected_entities.keys():
+        for eid in expected_entities.keys()-entities.keys():fail('missing_entity',entity_id=eid)
+        for eid in entities.keys()-expected_entities.keys():fail('extra_entity',entity_id=eid)
+    fts=defaultdict(list)
+    for row in store.execute('SELECT entity_id,name,description,aliases FROM entity_fts'):
+        fts[row['entity_id']].append(row)
+    surfaces=defaultdict(set)
+    for row in store.execute('SELECT kind,normalized_name,entity_id FROM entity_surfaces'):
+        surfaces[row['entity_id']].add((row['kind'],row['normalized_name']))
+    for eid,row in entities.items():
+        kind,mids=expected_entities.get(eid,(None,[]))
+        names={mentions[mid]['name'] for mid in mids if mid in mentions}
+        aliases=json.loads(row['aliases_json'])
+        if (row['kind']!=kind or row['name_origin']!='source_authored' or row['name'] not in names
+            or not names.issubset(set(aliases)|{row['name']}) or row['revision']!=digest([row['kind'],row['name'],row['description'],aliases,row['name_origin']])):
+            fail('entity_source_identity',entity_id=eid)
+        if mids and (row['name']!=mentions[mids[0]]['name'] or row['description']!=mentions[mids[0]]['description']):
+            fail('entity_source_payload',entity_id=eid)
+        if len(fts[eid])!=1 or (fts[eid][0]['name'],fts[eid][0]['description'],fts[eid][0]['aliases'])!=(row['name'],row['description'],' '.join(aliases)):
+            fail('entity_fts',entity_id=eid)
+        required={(row['kind'],' '.join(name.split()).casefold()) for name in (row['name'],*aliases)}
+        if not required.issubset(surfaces[eid]):fail('entity_surfaces',entity_id=eid)
+    for eid in (fts.keys()|surfaces.keys())-entities.keys():fail('extra_entity_index',entity_id=eid)
+    cfts=defaultdict(list)
+    for row in store.execute('SELECT contribution_id,description FROM contribution_fts'):
+        cfts[row['contribution_id']].append(row['description'])
+    for cid,row in contributions.items():
+        if cfts[cid]!=[row['description']]:fail('contribution_fts',contribution_id=cid)
+        if row['extraction_id'] not in sources:fail('dangling_contribution_source',contribution_id=cid)
+    for cid in cfts.keys()-contributions.keys():fail('extra_contribution_fts',contribution_id=cid)
+    areas={r['area_id']:r for r in store.execute('SELECT * FROM research_areas')}
+    memberships=Counter((r['area_id'],r['mention_id']) for r in store.execute('SELECT area_id,mention_id FROM research_area_members'))
+    area_fts=defaultdict(list)
+    for row in store.execute('SELECT area_id,name,description FROM research_area_fts'):
+        area_fts[row['area_id']].append(row)
+    for aid,group in expected_areas.items():
+        area=areas.get(aid)
+        if not area:fail('missing_research_area',area_id=aid);continue
+        if (area['name'],area['description'],area['revision'])!=(group['name'],group['description'],digest([group['name'],group['description']])):
+            fail('research_area_payload',area_id=aid)
+    for aid in areas.keys()-expected_areas.keys():fail('extra_research_area',area_id=aid)
+    for key in expected_memberships:
+        if memberships[key]!=1:fail('research_area_membership',area_id=key[0],mention_id=key[1],count=memberships[key])
+    for aid,mid in memberships.keys()-expected_memberships:
+        fail('extra_or_dangling_area_member',area_id=aid,mention_id=mid)
+    for aid,area in areas.items():
+        if len(area_fts[aid])!=1 or (area_fts[aid][0]['name'],area_fts[aid][0]['description'])!=(area['name'],area['description']):
+            fail('research_area_fts',area_id=aid)
+    for aid in area_fts.keys()-areas.keys():fail('extra_research_area_fts',area_id=aid)
+    # The proposal is an artifact of the actual clustering run; verify it also
+    # matches the frozen vectors, so replacing the artifact cannot mask a wrong partition.
+    proposal_path=job_dir/'problem-proposal.json'
+    try:
+        proposal=json.loads(proposal_path.read_text(encoding='utf-8'))
+        vectors={r['item_key']:r['vector'] for r in snapshot['vectors'] if r['kind']=='ResearchProblem'}
+        by_paper={(r['paper_id'],r['item_key']):r['mention_id'] for r in store.execute('SELECT m.mention_id,m.item_key,s.paper_id FROM mentions m JOIN sources s ON s.extraction_id=m.extraction_id WHERE m.kind=?',('ResearchProblem',))}
+        rp_vectors={mid:vectors[pid+'::'+key] for (pid,key),mid in by_paper.items()}
+        from .problem_clustering import cluster_problem_vectors
+        recalculated=cluster_problem_vectors(rp_vectors,k=int(meta['k']))
+        actual=sorted(tuple(parsed_groups[gid]) for gid,g in groups.items() if g['kind']=='ResearchProblem' and gid in parsed_groups)
+        if proposal['clusters']!=recalculated['clusters'] or actual!=sorted(tuple(c) for c in recalculated['clusters']):
+            fail('leiden_partition_mismatch')
+    except (OSError,ValueError,KeyError,TypeError) as exc:
+        fail('missing_or_invalid_leiden_proposal',error=str(exc)[:200])
+    pending_pairs=0
+    parent={mid:mid for mid,r in mentions.items() if r['kind'] in ('Method','Benchmark')}
+    def root(mid):
+        while parent[mid]!=mid:
+            parent[mid]=parent[parent[mid]];mid=parent[mid]
+        return mid
+    for pair in graph.execute('SELECT * FROM candidates'):
+        left=mentions.get(pair['left_id']);right=mentions.get(pair['right_id'])
+        if not left or not right or pair['kind'] not in ('Method','Benchmark') or left['kind']!=pair['kind'] or right['kind']!=pair['kind']:
+            fail('invalid_identity_candidate',pair_id=pair['pair_id']);continue
+        if pair['decision']=='different' and left['entity_id']==right['entity_id']:
+            fail('different_pair_merged',pair_id=pair['pair_id'])
+        if pair['decision']=='same':parent[root(pair['right_id'])]=root(pair['left_id'])
+        if pair['decision'] in ('pending','unjudged'):pending_pairs+=1
+    components=defaultdict(list)
+    for mid in sorted(parent):components[root(mid)].append(mid)
+    actual_mb={tuple(parsed_groups[gid]) for gid,g in groups.items() if g['kind'] in ('Method','Benchmark') and gid in parsed_groups}
+    if actual_mb!={tuple(mids) for mids in components.values()}:fail('identity_components_mismatch')
+    quality=_quality(cases,store,job_dir,model,mentions,contributions,fail,domain=True) if cases is not None else {'status':'untested','reason':'no labeled cases'}
+    counts={'approved_items':len(approved),'sources':len(sources),'mentions':len(mentions),'contributions':len(contributions),
+            'entities':len(entities),'research_areas':len(areas),'area_memberships':sum(memberships.values()),
+            'excluded_memberships':excluded_count,'member_reviews':len(reviews),'accepted_groups':sum(g['review']=='accepted' for g in groups.values()),
+            'pending_groups':sum(g['review']!='accepted' for g in groups.values()),'pending_pairs':pending_pairs,
+            'pending_mentions':sum(r['decision']=='pending' for r in mentions.values()),
+            'all_source_nodes_available':all(r['entity_id'] in entities and r['decision']=='new_entity' for r in mentions.values())}
+    return {'schema_version':'research-kg-graph-acceptance/1','graph_policy':'domain-v1','snapshot_hash':snapshot['snapshot_hash'],
+            'structural':{'passed':not failures,'failure_counts':dict(sorted(failures.items())),'failure_total':sum(failures.values()),
+                          'details':details,'details_truncated':sum(failures.values())>len(details),'coverage':counts,
+                          'complete_resolution':counts['pending_pairs']==counts['pending_groups']==counts['pending_mentions']==0},'quality':quality}
+
+
+def _quality(cases, source_db, job_dir, model, mentions, contributions, fail, *, domain=False):
     if not isinstance(cases,dict):raise ValueError('Cases must be a JSON object')
     queries=cases.get('queries',[]);pairs=cases.get('identity_pairs',[])
     if not isinstance(queries,list) or not isinstance(pairs,list):raise ValueError('Invalid case arrays')
     by_paper=defaultdict(list)
     for r in source_db.execute('SELECT m.mention_id,m.item_key,s.paper_id FROM mentions m JOIN sources s ON s.extraction_id=m.extraction_id'):
         by_paper[(r['paper_id'],r['item_key'])].append(r['mention_id'])
-    seen=set();resolved=wrong=pending=unknown=0
+    seen=set();resolved=wrong=pending=unknown=not_applicable=0
+    by_kind=defaultdict(Counter)
     for pair in pairs:
         cid=pair['id']
         if cid in seen:raise ValueError('Duplicate case ID')
@@ -252,13 +447,25 @@ def _quality(cases, source_db, job_dir, model, mentions, contributions, fail):
         right=by_paper.get((pair['right']['paper_id'],pair['right']['key']),[])
         if len(left)!=1 or len(right)!=1:fail('case_identity_lookup',case_id=cid);continue
         a=mentions[left[0]];b=mentions[right[0]]
-        if expected=='unknown':unknown+=1;continue
-        if a['decision']=='pending' or b['decision']=='pending':pending+=1
-        elif (a['entity_id']==b['entity_id'])==(expected=='same'):resolved+=1
-        else:wrong+=1
+        kind=a['kind'] if a['kind']==b['kind'] else 'cross_kind'
+        if expected=='unknown':
+            unknown+=1
+            if domain:by_kind[kind]['unknown_unscored']+=1
+            continue
+        if domain and a['kind']=='ResearchProblem' and b['kind']=='ResearchProblem':
+            not_applicable+=1;continue
+        if a['decision']=='pending' or b['decision']=='pending':
+            pending+=1
+            if domain:by_kind[kind]['pending']+=1
+        elif (a['entity_id']==b['entity_id'])==(expected=='same'):
+            resolved+=1
+            if domain:by_kind[kind]['resolved']+=1
+        else:
+            wrong+=1
+            if domain:by_kind[kind]['wrong']+=1
     labeled=[q for q in queries if q.get('expected_paper_ids')]
     if any(q.get('id') in seen for q in queries) or len({q.get('id') for q in queries})!=len(queries):raise ValueError('Duplicate case ID')
-    hits=[];reciprocals=[]
+    hits=[];reciprocals=[];area_hits=[];area_reciprocals=[]
     if labeled:
         # Search embeddings may populate cache; only a private copy is opened by SemanticStore.
         with tempfile.TemporaryDirectory() as tmp:
@@ -269,14 +476,23 @@ def _quality(cases, source_db, job_dir, model, mentions, contributions, fail):
             try:
                 for case in labeled:
                     expected=set(case['expected_paper_ids'])
-                    if case['kind'] not in (*KINDS.values(),'Contribution'):raise ValueError('Invalid query kind')
+                    if case['kind'] not in (*KINDS.values(),'Contribution',*(['ResearchArea'] if domain else [])):raise ValueError('Invalid query kind')
                     result=search.search(case['query'],kind=case['kind'],limit=5,expand_limit=20)['results']
-                    paper_sets=[{p[0] for p in search.db.execute('SELECT DISTINCT s.paper_id FROM mentions m JOIN sources s ON m.extraction_id=s.extraction_id WHERE m.entity_id=?',(r['entity_id'],))} if 'entity_id' in r else {r['paper_id']} for r in result]
+                    paper_sets=[{p[0] for p in search.db.execute('SELECT DISTINCT s.paper_id FROM research_area_members am JOIN mentions m ON am.mention_id=m.mention_id JOIN sources s ON m.extraction_id=s.extraction_id WHERE am.area_id=?',(r['entity_id'],))} if domain and r.get('kind')=='ResearchArea' else {p[0] for p in search.db.execute('SELECT DISTINCT s.paper_id FROM mentions m JOIN sources s ON m.extraction_id=s.extraction_id WHERE m.entity_id=?',(r['entity_id'],))} if 'entity_id' in r else {r['paper_id']} for r in result]
                     ranks=[i for i,pids in enumerate(paper_sets,1) if expected & pids]
                     rank=min(ranks) if ranks else None
-                    hits.append(int(rank is not None));reciprocals.append(1/rank if rank else 0)
+                    target_hits,target_reciprocals=(area_hits,area_reciprocals) if domain and case['kind']=='ResearchArea' else (hits,reciprocals)
+                    target_hits.append(int(rank is not None));target_reciprocals.append(1/rank if rank else 0)
             finally:search.close()
-    return {'status':'evaluated' if labeled or resolved or wrong or pending else 'untested','query_cases':len(queries),
-            'labeled_positive_queries':len(labeled),'hit_at_5':sum(hits)/len(hits) if hits else None,
+    return {'status':'evaluated' if labeled or resolved or wrong or pending else 'untested','query_cases':len(queries) if not domain else len(queries)-sum(q.get('kind')=='ResearchArea' for q in queries),
+            'labeled_positive_queries':len(hits) if domain else len(labeled),'hit_at_5':sum(hits)/len(hits) if hits else None,
             'mrr':sum(reciprocals)/len(reciprocals) if reciprocals else None,
-            'identity':{'resolved':resolved,'wrong':wrong,'pending':pending,'unknown_unscored':unknown}}
+            'identity':{'resolved':resolved,'wrong':wrong,'pending':pending,'unknown_unscored':unknown,
+                        **({'not_applicable_new_semantics':not_applicable,
+                            'by_kind':{kind:{key:by_kind[kind][key] for key in ('resolved','wrong','pending','unknown_unscored')}
+                                       for kind in ('Method','Benchmark')}} if domain else {})},
+            **({'research_area_queries':{'query_cases':sum(q.get('kind')=='ResearchArea' for q in queries),
+                                         'labeled_positive_queries':len(area_hits),
+                                         'hit_at_5':sum(area_hits)/len(area_hits) if area_hits else None,
+                                         'mrr':sum(area_reciprocals)/len(area_reciprocals) if area_reciprocals else None}}
+               if domain else {})}

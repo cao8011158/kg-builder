@@ -22,6 +22,98 @@ class FakeModel:
                 else [0.,1.] for t in texts]
 
 class SemanticTests(unittest.TestCase):
+    def test_research_area_retains_original_problem_and_local_expansion(self):
+        self.store.ingest(self.master,[self.eid])
+        problem=self.packet()
+        self.store.import_review({'schema_version':REVIEW_VERSION,'review_id':'source-rp',
+            'entities':[{'entity_id':'rp:source','kind':'ResearchProblem','name':'Memory decay',
+                         'description':'Agents forget memory','aliases':[]}],
+            'assignments':[self.assignment(problem,'new_entity','rp:source')]})
+        area={'area_id':'area:memory','name':'Agent memory','description':'Memory retention in agents'}
+        member={'area_id':'area:memory','mention_id':problem['mention_id']}
+        self.assertEqual(self.store.import_research_areas([area],[member])['memberships'],1)
+        self.assertEqual(self.store.import_research_areas([area],[member])['status'],'unchanged')
+        detail=self.store.get_entity('area:memory')
+        self.assertEqual(detail['entity_id'],'area:memory')
+        self.assertEqual(detail['mentions'][0]['problem_entity_id'],'rp:source')
+        self.assertEqual(detail['mentions'][0]['name'],'Memory decay')
+        self.assertEqual(self.store.get_entity('rp:source')['mentions'][0]['mention_id'],problem['mention_id'])
+        hit=self.store.search('retention',kind='ResearchArea')['results'][0]
+        self.assertEqual(hit['papers'][0]['paper_id'],self.paper)
+        self.assertEqual(hit['entity_id'],'area:memory')
+        self.assertTrue(any(r['kind']=='ResearchArea' for r in self.store.search('retention')['results']))
+        self.assertTrue(all(r['kind']=='ResearchProblem' for r in
+                            self.store.search('memory',kind='ResearchProblem')['results']))
+        with self.assertRaisesRegex(ValueError,'conflict'):
+            self.store.import_research_areas([dict(area,name='Wrong')],[member])
+        self.assertEqual(self.store.get_entity('area:memory')['name'],'Agent memory')
+        with self.assertRaisesRegex(ValueError,'ResearchProblem'):
+            self.store.import_research_areas([{'area_id':'area:bad','name':'Bad','description':'Bad'}],
+                [{'area_id':'area:bad','mention_id':self.packet('Method')['mention_id']}])
+        self.assertIsNone(self.store.get_entity('area:bad'))
+        plan=self.store.db.execute('''EXPLAIN QUERY PLAN SELECT m.mention_id,s.paper_id
+            FROM research_area_members a JOIN mentions m ON m.mention_id=a.mention_id
+            JOIN sources s ON s.extraction_id=m.extraction_id WHERE a.area_id=?
+            ORDER BY a.mention_id LIMIT ? OFFSET ?''',('area:memory',21,0)).fetchall()
+        self.assertTrue(any('sqlite_autoindex_research_area_members_1' in str(tuple(r)) for r in plan))
+        self.assertTrue(any('sqlite_autoindex_mentions_1' in str(tuple(r)) for r in plan))
+        paper_plan=self.store.db.execute('''EXPLAIN QUERY PLAN SELECT DISTINCT s.paper_id
+            FROM research_area_members a JOIN mentions m ON m.mention_id=a.mention_id
+            JOIN sources s ON s.extraction_id=m.extraction_id WHERE a.area_id=?
+            ORDER BY s.paper_id LIMIT ?''',('area:memory',2)).fetchall()
+        self.assertTrue(any('sqlite_autoindex_research_area_members_1' in str(tuple(r)) for r in paper_plan))
+        sparse_plan=self.store.db.execute('''EXPLAIN QUERY PLAN SELECT area_id FROM research_area_fts
+            WHERE research_area_fts MATCH ? ORDER BY bm25(research_area_fts) LIMIT ?''',('retention',100)).fetchall()
+        self.assertTrue(any('VIRTUAL TABLE INDEX' in str(tuple(r)) for r in sparse_plan))
+        def measured_detail():
+            steps=[0]
+            def progress():
+                steps[0]+=1
+                return 0
+            self.store.db.set_progress_handler(progress,1)
+            before=self.store.stats['detail_rows']
+            try: result=self.store.get_entity('area:memory',limit=1)
+            finally:self.store.db.set_progress_handler(None,0)
+            return steps[0],self.store.stats['detail_rows']-before,len(json.dumps(result))
+        cold=measured_detail();warm=measured_detail()
+        def measured_search():
+            steps=[0]
+            def progress():steps[0]+=1;return 0
+            self.store.db.set_progress_handler(progress,1)
+            before=self.store.stats['embeddings_computed']
+            try: result=self.store.search('retention',kind='ResearchArea',limit=1,expand_limit=1)
+            finally:self.store.db.set_progress_handler(None,0)
+            return (steps[0],self.store.stats['embeddings_computed']-before,
+                    len(json.dumps(result)),result['results'][0]['entity_id'])
+        search_baseline=measured_search()
+        with self.store.db:
+            for i in range(1000):
+                aid=f'area:unrelated:{i}'
+                self.store.db.execute('INSERT INTO research_areas VALUES(?,?,?,?)',
+                                      (aid,'Elsewhere','Z'*10000,f'rev:{i}'))
+                self.store.db.execute('INSERT INTO research_area_fts VALUES(?,?,?)',
+                                      (aid,'Elsewhere','Z'*10000))
+        enlarged=measured_detail()
+        print(f'area_detail_vm cold={cold} warm={warm} unrelated_1000={enlarged}')
+        self.assertEqual(cold[1:],warm[1:])
+        self.assertEqual(warm[1:],enlarged[1:])
+        self.assertLess(enlarged[0]-warm[0],100)
+        self.store._indexes.pop('ResearchArea',None)  # Fixture inserted rows outside the import API.
+        search_cold=measured_search();search_warm=measured_search()
+        print(f'area_search_vm baseline={search_baseline} unrelated_1000_cold={search_cold} warm={search_warm}')
+        self.assertEqual(search_cold[3:],('area:memory',))
+        self.assertEqual(search_warm[3:],('area:memory',))
+        self.assertEqual(search_cold[2],search_warm[2])
+        self.assertEqual(search_baseline[3],search_warm[3])
+        self.assertLess(search_warm[2],500)
+        self.assertLess(search_warm[0]-search_baseline[0],100)
+        changed=copy.deepcopy(self.payload)
+        changed['research_problems'][0]['description']='Changed source problem'
+        ingest_extraction(self.db,changed)
+        self.store.ingest(self.master,[self.eid])
+        self.assertEqual(self.store.db.execute('SELECT count(*) FROM research_area_members WHERE area_id=?',
+                                               ('area:memory',)).fetchone()[0],0)
+
     def setUp(self):
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
         self.root=Path(temp.name);self.master=self.root/'master.db'

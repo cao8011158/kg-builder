@@ -70,6 +70,14 @@ class SemanticStore:
           PRIMARY KEY(model_id,text_hash));
         CREATE VIRTUAL TABLE IF NOT EXISTS entity_fts USING fts5(entity_id UNINDEXED,name,description,aliases);
         CREATE VIRTUAL TABLE IF NOT EXISTS contribution_fts USING fts5(contribution_id UNINDEXED,description);
+        CREATE TABLE IF NOT EXISTS research_areas (
+          area_id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL, revision TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS research_area_members (
+          area_id TEXT NOT NULL REFERENCES research_areas(area_id) ON DELETE CASCADE,
+          mention_id TEXT NOT NULL REFERENCES mentions(mention_id) ON DELETE CASCADE,
+          PRIMARY KEY(area_id,mention_id));
+        CREATE INDEX IF NOT EXISTS research_area_members_mention ON research_area_members(mention_id,area_id);
+        CREATE VIRTUAL TABLE IF NOT EXISTS research_area_fts USING fts5(area_id UNINDEXED,name,description);
         ''')
         self.db.commit()
         # One-time migration for sidecars created before the exact alias directory.
@@ -132,6 +140,10 @@ class SemanticStore:
                 rows=self.db.execute('SELECT contribution_id,description FROM contributions ORDER BY contribution_id').fetchall()
                 ids=[r['contribution_id'] for r in rows]
                 texts=[r['description'] for r in rows]
+            elif kind=='ResearchArea':
+                rows=self.db.execute('SELECT area_id,name,description FROM research_areas ORDER BY area_id').fetchall()
+                ids=[r['area_id'] for r in rows]
+                texts=[r['name'] + '\n' + r['description'] for r in rows]
             else:
                 rows = self.db.execute('SELECT entity_id,name,description FROM entities WHERE kind=? ORDER BY entity_id',
                                        (kind,)).fetchall()
@@ -179,6 +191,81 @@ class SemanticStore:
         for ranking in (sparse,dense):
             for i,cid in enumerate(ranking):scores[cid]=scores.get(cid,0)+1/(60+i+1)
         return sorted(scores,key=lambda cid:(-scores[cid],cid))[:limit],scores
+
+    def _rank_areas(self, query, limit=100):
+        if not self.db.execute('SELECT 1 FROM research_areas LIMIT 1').fetchone():return [],{}
+        import re
+        terms=re.findall(r'[^\W_]+',query,flags=re.UNICODE)
+        sparse=[]
+        if terms:
+            expression=' OR '.join('"'+term.replace('"','')+'"' for term in terms[:16])
+            sparse=[r['area_id'] for r in self.db.execute('''SELECT area_id FROM research_area_fts
+                WHERE research_area_fts MATCH ? ORDER BY bm25(research_area_fts) LIMIT ?''',(expression,limit))]
+        dense=[]
+        if self.model:
+            dense=[h['id'] for h in self._index_for('ResearchArea').search(self._embed([query])[0],k=limit)]
+        scores={}
+        for ranking in (sparse,dense):
+            for i,area_id in enumerate(ranking):scores[area_id]=scores.get(area_id,0)+1/(60+i+1)
+        return sorted(scores,key=lambda area_id:(-scores[area_id],area_id))[:limit],scores
+
+    def import_research_areas(self, areas, memberships):
+        """Import area summaries and retained source problem members atomically."""
+        if not isinstance(areas,list) or not isinstance(memberships,list) or len(areas)>1000 or len(memberships)>10000:
+            raise ValueError('Bounded area and membership lists required')
+        area_ids=[]; member_keys=[]
+        for area in areas:
+            if not isinstance(area,dict) or not isinstance(area.get('area_id'),str) or not area['area_id'].startswith('area:') or not isinstance(area.get('name'),str) or not area['name'].strip() or not isinstance(area.get('description'),str) or not area['description'].strip():
+                raise ValueError('Invalid research area')
+            area_ids.append(area['area_id'])
+        for member in memberships:
+            if not isinstance(member,dict) or not isinstance(member.get('area_id'),str) or not isinstance(member.get('mention_id'),str):
+                raise ValueError('Invalid research area member')
+            member_keys.append((member['area_id'],member['mention_id']))
+        if len(set(area_ids))!=len(area_ids) or len(set(member_keys))!=len(member_keys):
+            raise ValueError('Duplicate research area or member')
+        declared_ids=set(area_ids)
+        if any(area_id not in declared_ids for area_id,_ in member_keys):
+            raise ValueError('Membership requires an area in this import')
+        inserted=[]; added_members=0
+        with self.db:
+            for area in areas:
+                area_id=area['area_id']
+                revision=digest([area['name'],area['description']])
+                existing=self.db.execute('SELECT name,description,revision FROM research_areas WHERE area_id=?',(area_id,)).fetchone()
+                if existing:
+                    if existing['revision']!=revision or existing['name']!=area['name'] or existing['description']!=area['description']:
+                        raise ValueError(f'Research area ID conflict: {area_id}')
+                    continue
+                self.db.execute('INSERT INTO research_areas VALUES(?,?,?,?)',
+                                (area_id,area['name'],area['description'],revision))
+                self.db.execute('INSERT INTO research_area_fts VALUES(?,?,?)',
+                                (area_id,area['name'],area['description']))
+                inserted.append(area)
+            for area_id,mid in member_keys:
+                row=self.db.execute('''SELECT m.kind,m.entity_id,m.decision,m.name,e.kind AS entity_kind,
+                    e.name AS entity_name,e.name_origin FROM mentions m
+                    LEFT JOIN entities e ON e.entity_id=m.entity_id WHERE m.mention_id=?''',(mid,)).fetchone()
+                if not row or row['kind']!='ResearchProblem' or row['decision']=='pending' or row['entity_kind']!='ResearchProblem' or row['name_origin']!='source_authored' or row['entity_name']!=row['name']:
+                    raise ValueError(f'Area member must be a decided source ResearchProblem: {mid}')
+                owners=self.db.execute('SELECT mention_id FROM mentions WHERE entity_id=? LIMIT 2',
+                                       (row['entity_id'],)).fetchall()
+                if len(owners)!=1 or owners[0]['mention_id']!=mid:
+                    raise ValueError(f'Area member must retain an individual ResearchProblem: {mid}')
+                if not self.db.execute('SELECT 1 FROM research_area_members WHERE area_id=? AND mention_id=?',
+                                       (area_id,mid)).fetchone():
+                    self.db.execute('INSERT INTO research_area_members VALUES(?,?)',(area_id,mid))
+                    added_members+=1
+        index_status='current'
+        if inserted and self.model and self._index_model==self.model.model_id and 'ResearchArea' in self._indexes:
+            try:
+                vectors=self._embed([a['name']+'\n'+a['description'] for a in inserted])
+                for area,vector in zip(inserted,vectors):self._indexes['ResearchArea'].upsert(area['area_id'],vector)
+            except Exception:
+                self._indexes.pop('ResearchArea',None)
+                index_status='rebuild_required'
+        return {'status':'imported' if inserted or added_members else 'unchanged',
+                'areas':len(inserted),'memberships':added_members,'index_status':index_status}
 
     def ingest(self, master_path, extraction_ids):
         """Import only explicitly chosen extractions, replacing changed sources atomically."""
@@ -421,7 +508,20 @@ class SemanticStore:
     def get_entity(self,entity_id,limit=20,offset=0):
         self._bound(limit,offset)
         entity=self.db.execute('SELECT * FROM entities WHERE entity_id=?',(entity_id,)).fetchone()
-        if not entity:return None
+        if not entity:
+            area=self.db.execute('SELECT * FROM research_areas WHERE area_id=?',(entity_id,)).fetchone()
+            if not area:return None
+            rows=self.db.execute('''SELECT m.mention_id,m.entity_id AS problem_entity_id,m.name,m.description,
+                m.role_json,m.version_or_subset,s.paper_id,s.version_id,s.title,s.source_url
+                FROM research_area_members a JOIN mentions m ON m.mention_id=a.mention_id
+                JOIN sources s ON s.extraction_id=m.extraction_id
+                WHERE a.area_id=? ORDER BY a.mention_id LIMIT ? OFFSET ?''',
+                (entity_id,limit+1,offset)).fetchall()
+            self.stats['detail_rows']+=1+len(rows)
+            members=[{**dict(r),'roles':json.loads(r['role_json'])} for r in rows[:limit]]
+            for member in members:del member['role_json']
+            return {**dict(area),'entity_id':entity_id,'kind':'ResearchArea','mentions':members,
+                    'next_offset':offset+limit if len(rows)>limit else None}
         rows=self.db.execute('''SELECT m.mention_id,m.name,m.description,m.role_json,m.version_or_subset,
             s.paper_id,s.version_id,s.title,s.source_url FROM mentions m JOIN sources s
             ON s.extraction_id=m.extraction_id WHERE m.entity_id=? ORDER BY m.mention_id LIMIT ? OFFSET ?''',
@@ -453,22 +553,28 @@ class SemanticStore:
     def search(self,query,limit=10,offset=0,kind=None,expand_limit=3):
         self._bound(limit,offset)
         if not isinstance(query,str) or not query.strip(): raise ValueError('Nonempty query required')
-        if kind and kind not in (*KINDS.values(),'Contribution'): raise ValueError('Unknown kind')
+        if kind and kind not in (*KINDS.values(),'Contribution','ResearchArea'): raise ValueError('Unknown kind')
         if not isinstance(expand_limit,int) or not 0<=expand_limit<=20: raise ValueError('Invalid expand_limit')
         scores={}
-        if kind!='Contribution':
+        if kind not in ('Contribution','ResearchArea'):
             for entity_kind in ([kind] if kind else list(KINDS.values())):
                 ids,ranking=self._rank_entities(query,entity_kind,100)
                 for eid in ids:scores[('entity',eid)]=ranking[eid]
         if kind in (None,'Contribution'):
             ids,ranking=self._rank_contributions(query,100)
             for cid in ids:scores[('contribution',cid)]=ranking[cid]
+        if kind in (None,'ResearchArea'):
+            ids,ranking=self._rank_areas(query,100)
+            for area_id in ids:scores[('area',area_id)]=ranking[area_id]
         found=[]
         for (typ,key),score in sorted(scores.items(),key=lambda pair:(-pair[1],pair[0])):
             if typ=='entity':
                 row=self.db.execute('SELECT entity_id,kind,name,description,aliases_json FROM entities WHERE entity_id=?',(key,)).fetchone()
                 if not row or (kind and row['kind']!=kind):continue
                 found.append(('entity',key,score))
+            elif typ=='area':
+                if self.db.execute('SELECT 1 FROM research_areas WHERE area_id=?',(key,)).fetchone():
+                    found.append(('area',key,score))
             else:found.append(('contribution',key,score))
             if len(found)>=offset+limit+1:break
         results=[]
@@ -479,6 +585,15 @@ class SemanticStore:
                     JOIN sources s ON s.extraction_id=m.extraction_id WHERE m.entity_id=? ORDER BY s.paper_id LIMIT ?''',
                     (key,expand_limit+1)).fetchall()
                 results.append({**dict(row),'score':score,'papers':[dict(x) for x in papers[:expand_limit]],
+                                'papers_truncated':len(papers)>expand_limit})
+            elif typ=='area':
+                row=self.db.execute('SELECT area_id,name,description FROM research_areas WHERE area_id=?',(key,)).fetchone()
+                papers=self.db.execute('''SELECT DISTINCT s.paper_id,s.title,s.version_id,s.source_url
+                    FROM research_area_members a JOIN mentions m ON m.mention_id=a.mention_id
+                    JOIN sources s ON s.extraction_id=m.extraction_id WHERE a.area_id=?
+                    ORDER BY s.paper_id LIMIT ?''',(key,expand_limit+1)).fetchall()
+                results.append({**dict(row),'entity_id':key,'kind':'ResearchArea','score':score,
+                                'papers':[dict(x) for x in papers[:expand_limit]],
                                 'papers_truncated':len(papers)>expand_limit})
             else:
                 row=self.db.execute('''SELECT c.contribution_id,c.description,s.paper_id,s.version_id,s.title,s.source_url

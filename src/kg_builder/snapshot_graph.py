@@ -95,7 +95,7 @@ def _paper(papers, extraction):
 
 class SnapshotGraph:
     def __init__(self, snapshot_path, job_dir, *, client=None, k=20, batch_size=32,
-                 name_mode='external', model=None, lease_seconds=900, namer=None, name_base_url=None, name_model=None, read_input=True, embedding_cache_dir=None, name_concurrency=3):
+                 name_mode='external', model=None, lease_seconds=900, namer=None, name_base_url=None, name_model=None, read_input=True, embedding_cache_dir=None, name_concurrency=3, graph_policy=None):
         self.snapshot_path = Path(snapshot_path).resolve()
         self.job_dir = Path(job_dir).resolve()
         self.job_dir.mkdir(parents=True, exist_ok=True)
@@ -139,6 +139,7 @@ class SnapshotGraph:
         CREATE TABLE IF NOT EXISTS candidates(pair_id TEXT PRIMARY KEY,kind TEXT NOT NULL,left_id TEXT NOT NULL,right_id TEXT NOT NULL,similarity REAL NOT NULL,decision TEXT NOT NULL DEFAULT 'unjudged',audit TEXT);
         CREATE INDEX IF NOT EXISTS candidate_decisions ON candidates(decision,kind,pair_id);
         CREATE TABLE IF NOT EXISTS groups(group_id TEXT PRIMARY KEY,kind TEXT NOT NULL,members_json TEXT NOT NULL,name TEXT,description TEXT,review TEXT NOT NULL DEFAULT 'unreviewed',issues_json TEXT,audit TEXT,name_review TEXT NOT NULL DEFAULT 'unreviewed',name_audit TEXT);
+        CREATE TABLE IF NOT EXISTS member_reviews(group_id TEXT NOT NULL,mention_id TEXT NOT NULL,excluded INTEGER NOT NULL,audit TEXT NOT NULL,PRIMARY KEY(group_id,mention_id));
         CREATE INDEX IF NOT EXISTS group_review ON groups(review,kind,group_id);
         CREATE TABLE IF NOT EXISTS tasks(task_id TEXT PRIMARY KEY,group_id TEXT UNIQUE NOT NULL, status TEXT NOT NULL,token TEXT,expires REAL,worker TEXT,attempts INTEGER NOT NULL DEFAULT 0,result_json TEXT,reason TEXT,queued_at REAL,claimed_at REAL);
         CREATE INDEX IF NOT EXISTS task_claim ON tasks(status,expires,task_id);
@@ -147,6 +148,12 @@ class SnapshotGraph:
         for column, sqltype in (('started_at','REAL'),('finished_at','REAL'),('http_intervals_json','TEXT')):
             if column not in columns:self.db.execute(f'ALTER TABLE jev_requests ADD COLUMN {column} {sqltype}')
         saved = self._meta('snapshot_hash')
+        saved_policy = self._meta('graph_policy')
+        self.graph_policy = saved_policy or ('legacy' if saved else (graph_policy or 'domain-v1'))
+        if graph_policy is not None and graph_policy != self.graph_policy:
+            raise ValueError('Graph job policy cannot be changed')
+        if self.graph_policy not in ('legacy','domain-v1'):
+            raise ValueError('Unknown graph policy')
         if saved and saved != self.snapshot['snapshot_hash']:
             raise ValueError('Graph job is bound to a different immutable snapshot')
         saved_file = self._meta('file_hash')
@@ -161,6 +168,7 @@ class SnapshotGraph:
                 self._set_meta('started_at', str(time.time()))
                 self._set_meta('k', str(k))
                 self._set_meta('name_mode', name_mode)
+                self._set_meta('graph_policy', self.graph_policy)
         elif self._meta('snapshot_stat') != stamp:
             # The full file was read above and both canonical and byte digests matched.
             # A restored copy can have a new path/mtime without changing the input.
@@ -287,6 +295,7 @@ class SnapshotGraph:
                 bykind[r['kind']][r['mention_id']] = vectors[r['paper_id']+'::'+r['item_key']][1]
             pairs = {}
             for kind, data in bykind.items():
+                if self.graph_policy == 'domain-v1' and kind == 'ResearchProblem':continue
                 index = HNSWIndex(data, self._meta('model_id') or 'empty-snapshot')
                 for mid, vector in data.items():
                     for neighbor in index.search(vector, min(len(data), self.k+1)):
@@ -395,6 +404,116 @@ class SnapshotGraph:
             with self.db:self._set_meta('phase','grouped')
         finally:store.close()
 
+    def _groups_domain(self):
+        """Review each candidate membership; neither uncertainty nor pending edges freeze a group."""
+        from .decision_api import review_group_members
+        if self.client is None:raise ValueError('Jev client required for member review')
+        store=SemanticStore(self.job_dir/'semantic.sqlite')
+        try:
+            members={r['mention_id']:dict(r) for r in store.db.execute('SELECT * FROM mentions')}
+            parent={mid:mid for mid,r in members.items() if r['kind']!='ResearchProblem'}
+            def root(mid):
+                while parent[mid]!=mid:
+                    parent[mid]=parent[parent[mid]];mid=parent[mid]
+                return mid
+            for row in self.db.execute("SELECT left_id,right_id FROM candidates WHERE decision='same'"):
+                a,b=root(row['left_id']),root(row['right_id']);parent[b]=a
+            conflicts=[dict(r) for r in self.db.execute("SELECT pair_id,kind,left_id,right_id FROM candidates WHERE decision='different'")
+                       if root(r['left_id'])==root(r['right_id'])]
+            if conflicts:
+                with self.db:self._set_meta('identity_conflicts',json.dumps(conflicts,sort_keys=True))
+                raise ValueError('Explicit different judgment conflicts with a same identity chain; user decision required: '+json.dumps(conflicts,sort_keys=True))
+            components={}
+            for mid in sorted(parent):components.setdefault(root(mid),[]).append(mid)
+            proposal=json.loads((self.job_dir/'problem-proposal.json').read_text(encoding='utf-8'))
+            clusters=proposal['clusters']
+            rp={mid for mid,r in members.items() if r['kind']=='ResearchProblem'}
+            if len({mid for cluster in clusters for mid in cluster})!=sum(map(len,clusters)) or {mid for cluster in clusters for mid in cluster}!=rp:
+                raise ValueError('Leiden proposal does not partition ResearchProblem mentions')
+            all_groups=list(components.values())+[sorted(cluster) for cluster in clusters]
+            groups=[]
+            for mids in all_groups:
+                mids=sorted(mids);first=members[mids[0]]
+                gid='group:'+digest(mids)[:32]
+                groups.append({'group_id':gid,'kind':first['kind'],'members':mids,
+                               'name':first['name'],'description':first['description']})
+            with self.db:
+                for group in groups:
+                    self.db.execute('''INSERT OR IGNORE INTO groups(group_id,kind,members_json,name,description,review)
+                                       VALUES(?,?,?,?,?,'unreviewed')''',
+                                    (group['group_id'],group['kind'],json.dumps(group['members']),group['name'],group['description']))
+            inputs=[]
+            for g in groups:
+                if g['kind']=='ResearchProblem':continue
+                for mid in g['members']:
+                    if self.db.execute('SELECT 1 FROM member_reviews WHERE group_id=? AND mention_id=?',(g['group_id'],mid)).fetchone():continue
+                    m=members[mid]
+                    inputs.append({'membership_id':'membership:'+digest([g['group_id'],mid])[:32],
+                                   'group_id':g['group_id'],'kind':'ResearchArea' if g['kind']=='ResearchProblem' else g['kind'],
+                                   'name':g['name'],'description':g['description'],
+                                   'member':{'mention_id':mid,'name':m['name'],'description':m['description'],
+                                             'source':json.loads(m['source_json'])}})
+            for start in range(0,len(inputs),self.batch_size):
+                batch=inputs[start:start+self.batch_size]
+                try:results=review_group_members(batch,self.client)
+                except Exception as exc:
+                    self._record_failure(exc);raise
+                mapping={r['membership_id']:r for r in results}
+                if len(mapping)!=len(results) or set(mapping)!={x['membership_id'] for x in batch}:
+                    raise ValueError('Incomplete or duplicate member review')
+                with self.db:
+                    for item in batch:
+                        result=mapping[item['membership_id']]
+                        self._record_requests(result)
+                        if result.get('excluded') != (result.get('choice')=='not_belongs' and result.get('confidence',0)>0.7):
+                            raise ValueError('Member exclusion disagrees with strict policy')
+                        self.db.execute('INSERT INTO member_reviews VALUES(?,?,?,?)',
+                                        (item['group_id'],item['member']['mention_id'],int(result['excluded']),json.dumps(result,sort_keys=True)))
+            with self.db:
+                for g in groups:
+                    self.db.execute("UPDATE groups SET review='accepted' WHERE group_id=?",(g['group_id'],))
+                    if g['kind']=='ResearchProblem' and len(g['members'])>=2:
+                        self.db.execute("INSERT OR IGNORE INTO tasks(task_id,group_id,status,queued_at) VALUES(?,?,'queued',?)",
+                                        ('name:'+g['group_id'],g['group_id'],time.time()))
+                self._set_meta('phase','grouped')
+        finally:store.close()
+
+    def _review_area_members(self):
+        """Judge area membership only against the actual generated area summary."""
+        from .decision_api import review_group_members
+        groups=self.db.execute("""SELECT g.* FROM groups g JOIN tasks t ON t.group_id=g.group_id
+            WHERE g.kind='ResearchProblem' AND t.status='done' ORDER BY g.group_id""").fetchall()
+        if not groups:return
+        store=SemanticStore(self.job_dir/'semantic.sqlite')
+        try:
+            inputs=[]
+            for group in groups:
+                for mid in json.loads(group['members_json']):
+                    if self.db.execute('SELECT 1 FROM member_reviews WHERE group_id=? AND mention_id=?',(group['group_id'],mid)).fetchone():continue
+                    row=store.db.execute('SELECT name,description,source_json FROM mentions WHERE mention_id=?',(mid,)).fetchone()
+                    inputs.append({'membership_id':'membership:'+digest([group['group_id'],mid])[:32],
+                                   'group_id':group['group_id'],'kind':'ResearchArea','name':group['name'],
+                                   'description':group['description'],'member':{'mention_id':mid,'name':row['name'],
+                                   'description':row['description'],'source':json.loads(row['source_json'])}})
+            if inputs and self.client is None:raise ValueError('Jev client required for named area member review')
+            for start in range(0,len(inputs),self.batch_size):
+                batch=inputs[start:start+self.batch_size]
+                try:results=review_group_members(batch,self.client)
+                except Exception as exc:self._record_failure(exc);raise
+                mapping={r['membership_id']:r for r in results}
+                if len(mapping)!=len(results) or set(mapping)!={i['membership_id'] for i in batch}:
+                    raise ValueError('Incomplete or duplicate area member review')
+                with self.db:
+                    for item in batch:
+                        result=mapping[item['membership_id']]
+                        self._record_requests(result)
+                        if result.get('excluded') != (result.get('choice')=='not_belongs' and result.get('confidence',0)>0.7):
+                            raise ValueError('Area member exclusion disagrees with strict policy')
+                        result={**result,'area_revision':digest([item['name'],item['description']])}
+                        self.db.execute('INSERT INTO member_reviews VALUES(?,?,?,?)',
+                                        (item['group_id'],item['member']['mention_id'],int(result['excluded']),json.dumps(result,sort_keys=True)))
+        finally:store.close()
+
     def claim(self, worker, limit=5):
         if not worker or not 1<=limit<=100:raise ValueError('Worker and limit 1..100 required')
         now=time.time();out=[]
@@ -415,7 +534,7 @@ class SnapshotGraph:
                         details.append({'mention_id':mid,'name':m['name'],'description':m['description'],'paper_id':m['paper_id'],'title':m['title'],'source_url':m['source_url'],'source':json.loads(m['source_json'])})
                     out.append({'task_id':row['task_id'],'group_id':row['group_id'],'kind':'name_group',
                                 'lease_token':token,'input_hash':digest(details),'members':details,
-                                'instructions':'Provide a concise canonical ResearchProblem name and description grounded in the source members.'})
+                                'instructions':('Summarize a thematic ResearchArea covering the related but distinct research problems. Provide a concise area name and description grounded in the source members.' if self.graph_policy=='domain-v1' else 'Provide a concise canonical ResearchProblem name and description grounded in the source members.')})
             finally:store.close()
             self.db.commit()
         except BaseException:self.db.rollback();raise
@@ -461,7 +580,7 @@ class SnapshotGraph:
         if self.namer is None and not (self.name_base_url and self.name_model):
             raise ValueError('API name mode needs name_base_url and name_model')
         namer = self.namer or OptionalLLMExtractor(self.name_base_url,self.name_model,enabled=True)
-        prompt = 'Name this coherent ResearchProblem group using supplied source evidence. Return JSON with name, description and group_id exactly matching the input.'
+        prompt = ('Summarize a thematic ResearchArea from related, potentially distinct research problems. Use supplied source evidence. Return JSON with name, description and group_id exactly matching the input.' if self.graph_policy=='domain-v1' else 'Name this coherent ResearchProblem group using supplied source evidence. Return JSON with name, description and group_id exactly matching the input.')
         # Claim and submit use the owning SQLite thread. Workers only call the HTTP namer.
         with ThreadPoolExecutor(max_workers=self.name_concurrency) as pool:
             while True:
@@ -509,6 +628,57 @@ class SnapshotGraph:
                     'entities':entities,'assignments':assignments}
             result=store.import_review(review)
             with self.db:self._set_meta('phase','complete');self._set_meta('review_result',json.dumps(result))
+        finally:store.close()
+
+    def _materialize_domain(self):
+        if self.db.execute("SELECT 1 FROM tasks WHERE status!='done' LIMIT 1").fetchone():return
+        store=SemanticStore(self.job_dir/'semantic.sqlite',self.model)
+        try:
+            store.export_candidates(limit=1)
+            groups=self.db.execute("SELECT * FROM groups WHERE review='accepted' ORDER BY group_id").fetchall()
+            entities=[];assignments=[];areas=[];memberships=[]
+            mention_rows={r['mention_id']:dict(r) for r in store.db.execute('''SELECT m.mention_id,m.name,m.description,m.mention_hash,
+                m.kind,s.source_hash FROM mentions m JOIN sources s ON s.extraction_id=m.extraction_id''')}
+            def add_entity(kind,mids):
+                mids=sorted(mids)
+                representative=mention_rows[mids[0]]
+                name=representative['name'];description=representative['description']
+                eid='entity:'+digest([kind,mids])[:32]
+                names={mention_rows[mid]['name'] for mid in mids}
+                entities.append({'entity_id':eid,'kind':kind,'name':name,'description':description,
+                                 'aliases':sorted(names-{name}),'name_origin':'source_authored'})
+                for mid in mids:
+                    m=mention_rows[mid]
+                    assignments.append({'mention_id':mid,'model_id':store.model.model_id if store.model else None,
+                                        'precondition':digest([mid,m['source_hash'],m['mention_hash'],store.model.model_id if store.model else None]),
+                                        'candidate_revisions':{},'decision':'new_entity','entity_id':eid})
+            covered=set()
+            for group in groups:
+                mids=json.loads(group['members_json']);kind=group['kind']
+                audits={r['mention_id']:r['excluded'] for r in self.db.execute('SELECT mention_id,excluded FROM member_reviews WHERE group_id=?',(group['group_id'],))}
+                if kind!='ResearchProblem' or len(mids)>=2:
+                    if set(audits)!=set(mids):raise ValueError('Missing member review before materialization')
+                if covered.intersection(mids):raise ValueError('Mention appears in more than one group')
+                covered.update(mids)
+                kept=[mid for mid in mids if not audits.get(mid,0)]
+                if kind=='ResearchProblem':
+                    for mid in mids:add_entity(kind,[mid])
+                    if len(mids)>=2 and kept:
+                        area_id='area:'+digest([group['group_id']])[:32]
+                        areas.append({'area_id':area_id,'name':group['name'],'description':group['description']})
+                        memberships.extend({'area_id':area_id,'mention_id':mid} for mid in kept)
+                else:
+                    if kept:add_entity(kind,kept)
+                    for mid in mids:
+                        if audits[mid]:add_entity(kind,[mid])
+            if covered!=set(mention_rows):raise ValueError('Graph groups do not cover all source mentions')
+            review={'schema_version':REVIEW_VERSION,'review_id':'snapshot:'+self.snapshot['snapshot_hash'],
+                    'entities':entities,'assignments':assignments}
+            result=store.import_review(review)
+            area_result=store.import_research_areas(areas,memberships)
+            with self.db:
+                self._set_meta('phase','complete');self._set_meta('review_result',json.dumps(result))
+                self._set_meta('area_result',json.dumps(area_result))
         finally:store.close()
 
     def _final_name_review(self):
@@ -569,7 +739,7 @@ class SnapshotGraph:
         model=self._compatible_model()
         store=SemanticStore(self.job_dir/'semantic.sqlite',model)
         try:
-            for kind in (*KINDS.values(),'Contribution'):
+            for kind in (*KINDS.values(),'Contribution',*(['ResearchArea'] if self.graph_policy=='domain-v1' else [])):
                 index=store._index_for(kind)
                 if index._vectors:
                     first=next(iter(index._vectors.values()))
@@ -587,12 +757,16 @@ class SnapshotGraph:
         if phase=='new':self._timed('snapshot_import_cpu',self._prepare_store);phase='imported'
         if phase=='imported':self._timed('candidate_graph_cpu',self._candidates);phase='candidates'
         if phase=='candidates':self._timed('jev_pair_wall',self._judge);phase='judged'
-        if phase=='judged':self._timed('jev_group_wall',self._groups);phase='grouped'
+        if phase=='judged':
+            self._timed('jev_member_wall' if self.graph_policy=='domain-v1' else 'jev_group_wall',
+                        self._groups_domain if self.graph_policy=='domain-v1' else self._groups)
+            phase='grouped'
         if phase=='grouped':
             if self.name_mode=='api':self._timed('name_api_wall',self._api_names)
             if not self.db.execute("SELECT 1 FROM tasks WHERE status!='done' LIMIT 1").fetchone():
-                self._timed('jev_final_name_wall',self._final_name_review)
-            self._timed('materialize_cpu',self._materialize)
+                if self.graph_policy=='legacy':self._timed('jev_final_name_wall',self._final_name_review)
+                else:self._timed('jev_area_member_wall',self._review_area_members)
+            self._timed('materialize_cpu',self._materialize_domain if self.graph_policy=='domain-v1' else self._materialize)
         if self._meta('phase')=='complete' and self._meta('index_status')!='verified':
             self._timed('retrieval_index_cpu',self._build_indexes)
         if self._meta('phase')=='complete' and self._meta('index_status')=='verified' and not self._meta('completed_at'):
@@ -628,7 +802,14 @@ class SnapshotGraph:
             if previous is not None and active:union+=instant-previous
             active+=delta;peak=max(peak,active);previous=instant
         stats=getattr(self.client,'concurrency_stats',None)
-        return {'phase':self._meta('phase'),'snapshot_hash':self._meta('snapshot_hash'),
+        memberships={r['excluded']:r['n'] for r in self.db.execute('SELECT excluded,count(*) n FROM member_reviews GROUP BY excluded')}
+        area_count=0
+        if store_path.exists() and self.graph_policy=='domain-v1' and self._meta('phase')=='complete':
+            with sqlite3.connect(store_path) as db:
+                area_count=db.execute('SELECT count(*) FROM research_areas').fetchone()[0]
+        return {'phase':self._meta('phase'),'graph_policy':self.graph_policy,'snapshot_hash':self._meta('snapshot_hash'),
+                'research_areas':area_count,'retained_memberships':memberships.get(0,0),
+                'excluded_memberships':memberships.get(1,0),'identity_conflicts':json.loads(self._meta('identity_conflicts') or '[]'),
                 'candidate_pairs':counts,'groups':groups,'name_tasks':tasks,'mentions':mention_counts,
                 'stage_seconds':{r['name']:r['seconds'] for r in self.db.execute('SELECT * FROM stage')},
                 'pending_pairs':counts.get('pending',0),'pending_groups':groups.get('pending',0),

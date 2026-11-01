@@ -50,6 +50,15 @@ class FakeEmbedding:
 
 
 class SnapshotGraphTests(unittest.TestCase):
+    def setUp(self):
+        from kg_builder import snapshot_graph
+        original=snapshot_graph.SnapshotGraph.__init__
+        def legacy_init(instance, *args, **kwargs):
+            kwargs.setdefault('graph_policy','legacy')
+            return original(instance,*args,**kwargs)
+        patcher=patch.object(snapshot_graph.SnapshotGraph,'__init__',legacy_init)
+        patcher.start();self.addCleanup(patcher.stop)
+
     def test_jev_http_intervals_are_distinct_from_backoff_and_unique_on_replay(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);source=root/'snapshot.json';fixture(source)
@@ -290,3 +299,121 @@ class SnapshotGraphTests(unittest.TestCase):
                 job.close()
 
 if __name__=='__main__':unittest.main()
+
+
+class DomainGraphTests(unittest.TestCase):
+    def test_leiden_members_and_strict_exclusion_keep_source_nodes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'snapshot.json';fixture(source,n=2)
+            def judge(items,client):
+                return [{'pair_id':p['pair_id'],'decision':'pending' if p['kind']=='Benchmark' else 'same','raw':{}} for p in items]
+            def members(items,client,rejection_threshold=0.7):
+                results=[]
+                for item in items:
+                    if item['kind']=='ResearchArea':
+                        self.assertEqual(item['name'],'Agent memory research')
+                        self.assertEqual(item['description'],'Problems concerning memory')
+                    excluded=item['member']['name']=='Method 2'
+                    borderline=item['member']['name']=='Memory problem 2'
+                    results.append({'membership_id':item['membership_id'],'group_id':item['group_id'],
+                                    'choice':'not_belongs' if excluded or borderline else 'belongs',
+                                    'confidence':0.9 if excluded else (0.7 if borderline else 0.9),
+                                    'excluded':excluded,'raw':{'test':True}})
+                return results
+            with patch('kg_builder.decision_api.judge_pairs',judge),patch('kg_builder.decision_api.review_group_members',members):
+                job=SnapshotGraph(source,root/'job',graph_policy='domain-v1',client=object(),k=1,model=FakeEmbedding())
+                state=job.run()
+                self.assertEqual(state['phase'],'grouped')
+                self.assertEqual(state['pending_pairs'],1)
+                self.assertEqual(state['excluded_memberships'],1)
+                self.assertEqual(state['name_tasks'],{'queued':1})
+                self.assertEqual(job.db.execute("SELECT count(*) FROM member_reviews mr JOIN groups g ON g.group_id=mr.group_id WHERE g.kind='ResearchProblem'").fetchone()[0],0)
+                proposal=json.loads((root/'job'/'problem-proposal.json').read_text())
+                actual=[json.loads(r[0]) for r in job.db.execute("SELECT members_json FROM groups WHERE kind='ResearchProblem'")]
+                self.assertEqual(sorted(map(sorted,actual)),sorted(map(sorted,proposal['clusters'])))
+                task=job.claim('worker')[0]
+                self.assertIn('ResearchArea',task['instructions'])
+                job.submit([{'task_id':task['task_id'],'lease_token':task['lease_token'],
+                             'input_hash':task['input_hash'],'result':{'group_id':task['group_id'],
+                             'name':'Agent memory research','description':'Problems concerning memory'}}])
+                state=job.run()
+                self.assertEqual(state['phase'],'complete')
+                self.assertEqual(state['research_areas'],1)
+                self.assertEqual(state['pending_mentions'],0)
+                self.assertEqual(state['index_builds'],5)
+                self.assertEqual(job.db.execute("SELECT count(*) FROM member_reviews mr JOIN groups g ON g.group_id=mr.group_id WHERE g.kind='ResearchProblem' AND json_extract(mr.audit,'$.area_revision') IS NOT NULL").fetchone()[0],2)
+                job.close()
+            store=SemanticStore(root/'job'/'semantic.sqlite',FakeEmbedding())
+            try:
+                self.assertEqual(store.db.execute("SELECT count(*) FROM entities WHERE kind='ResearchProblem'").fetchone()[0],2)
+                self.assertEqual(store.db.execute("SELECT count(*) FROM entities WHERE kind='Method'").fetchone()[0],2)
+                self.assertEqual(store.db.execute('SELECT count(*) FROM research_area_members').fetchone()[0],2)
+                self.assertEqual(store.search('Agent memory research',kind='ResearchArea')['results'][0]['name'],'Agent memory research')
+            finally:store.close()
+
+    def test_saved_policy_is_immutable_and_old_job_without_policy_is_legacy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'snapshot.json';fixture(source)
+            job=SnapshotGraph(source,root/'new');self.assertEqual(job.graph_policy,'domain-v1');job.close()
+            with self.assertRaisesRegex(ValueError,'policy cannot be changed'):
+                SnapshotGraph(source,root/'new',graph_policy='legacy')
+            job=SnapshotGraph(source,root/'old',graph_policy='legacy')
+            with job.db:job.db.execute("DELETE FROM meta WHERE key='graph_policy'")
+            job.close()
+            job=SnapshotGraph(source,root/'old');self.assertEqual(job.graph_policy,'legacy');job.close()
+
+    def test_conflicting_different_same_chain_requires_decision(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'snapshot.json';fixture(source,n=3)
+            def conflicting(items,client):
+                method=sorted((p for p in items if p['kind']=='Method'),key=lambda p:(p['left']['mention_id'],p['right']['mention_id']))
+                different=method[0]['pair_id']
+                return [{'pair_id':p['pair_id'],'decision':'different' if p['pair_id']==different else 'same','raw':{}}
+                        for p in items]
+            with patch('kg_builder.decision_api.judge_pairs',conflicting):
+                job=SnapshotGraph(source,root/'job',graph_policy='domain-v1',client=object(),k=2,model=FakeEmbedding())
+                with self.assertRaisesRegex(ValueError,'user decision required'):job.run()
+                self.assertEqual(job.status()['phase'],'judged')
+                self.assertTrue(job.status()['identity_conflicts'])
+                job.close()
+
+    def test_api_area_naming_and_terminal_replay_without_api(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'snapshot.json';fixture(source)
+            class Namer:
+                def generate_json(self,prompt,state,*,required_keys):
+                    self_outer.assertIn('thematic ResearchArea',prompt)
+                    return {'group_id':state['group_id'],'name':'Memory research area','description':'A field of agent memory'}
+            self_outer=self
+            def reviewed(items,client,rejection_threshold=0.7):
+                return [{'membership_id':i['membership_id'],'excluded':False,'choice':'belongs',
+                         'confidence':0.9,'raw':{}} for i in items]
+            with patch('kg_builder.decision_api.judge_pairs',pairs),patch('kg_builder.decision_api.review_group_members',reviewed):
+                job=SnapshotGraph(source,root/'job',graph_policy='domain-v1',client=object(),k=1,
+                                  model=FakeEmbedding(),name_mode='api',namer=Namer())
+                self.assertEqual(job.run()['phase'],'complete')
+                job.close()
+            job=SnapshotGraph(source,root/'job',graph_policy='domain-v1',k=1,name_mode='api',model=FakeEmbedding())
+            self.assertEqual(job.run()['phase'],'complete')
+            self.assertEqual(job.status()['research_areas'],1)
+            job.close()
+
+    def test_singleton_problems_have_no_area_or_fabricated_reviews(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'snapshot.json';fixture(source,n=2)
+            def singleton_proposal(vectors,**kwargs):
+                return {'clusters':[[mid] for mid in sorted(vectors)],'edges':[],'diagnostics':{'algorithm':'leiden-cpm'}}
+            def reviewed(items,client,rejection_threshold=0.7):
+                self.assertTrue(all(i['kind']!='ResearchArea' for i in items))
+                return [{'membership_id':i['membership_id'],'excluded':False,'choice':'belongs',
+                         'confidence':0.9,'raw':{}} for i in items]
+            with patch('kg_builder.snapshot_graph.cluster_problem_vectors',singleton_proposal),\
+                 patch('kg_builder.decision_api.judge_pairs',pairs),\
+                 patch('kg_builder.decision_api.review_group_members',reviewed):
+                job=SnapshotGraph(source,root/'job',graph_policy='domain-v1',client=object(),k=1,model=FakeEmbedding())
+                state=job.run()
+                self.assertEqual(state['phase'],'complete')
+                self.assertEqual(state['name_tasks'],{})
+                self.assertEqual(state['research_areas'],0)
+                self.assertEqual(job.db.execute("SELECT count(*) FROM member_reviews mr JOIN groups g ON g.group_id=mr.group_id WHERE g.kind='ResearchProblem'").fetchone()[0],0)
+                job.close()

@@ -10,7 +10,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
-from kg_builder.decision_api import JevClient, classify_scope, review_extractions, review_items, review_completeness, judge_pairs, review_groups
+from kg_builder.decision_api import JevClient, classify_scope, review_extractions, review_items, review_completeness, judge_pairs, review_groups, review_group_members
 
 
 class FakeResponse:
@@ -35,6 +35,31 @@ class FakeClient:
 
 
 class DecisionTests(unittest.TestCase):
+    def test_member_review_strict_boundary_and_audit(self):
+        item={'membership_id':'g:m','group_id':'g','kind':'ResearchArea',
+              'name':'Agent memory','description':'Research on long horizon agent memory',
+              'member':{'mention_id':'m','name':'Memory decay','description':'Agents forget',
+                        'source':{'paper_id':'p'}}}
+        for choice,confidence,excluded in [('not_belongs',.7,False),('not_belongs',.700001,True),
+                                          ('belongs',1,False),('insufficient',1,False)]:
+            with self.subTest(choice=choice,confidence=confidence):
+                client=FakeClient({'membership':choice},confidence)
+                result=review_group_members([item],client)[0]
+                self.assertEqual(result['excluded'],excluded)
+                self.assertEqual((result['choice'],result['confidence']),(choice,confidence))
+                self.assertEqual(result['membership_id'],'g:m')
+                self.assertIn('distinct research problems',client.calls[0][1]['i0_membership']['instructions'])
+                self.assertIn('requests',result['raw'])
+        method=dict(item,kind='Method')
+        client=FakeClient({'membership':'not_belongs'})
+        self.assertTrue(review_group_members([method],client)[0]['excluded'])
+        self.assertIn('actual method or benchmark identity',client.calls[0][1]['i0_membership']['instructions'])
+        with self.assertRaises(ValueError):review_group_members([item,item],client)
+        class FailingClient:
+            def decide(self,*args):raise RuntimeError('offline failure')
+        with self.assertRaisesRegex(RuntimeError,'offline failure'):
+            review_group_members([item],FailingClient())
+
     def test_shared_http_budget_and_per_thread_audit(self):
         client=JevClient(max_concurrency=2, max_retries=0)
         barrier=threading.Barrier(2, timeout=3)
