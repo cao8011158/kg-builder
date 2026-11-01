@@ -58,3 +58,28 @@ root发现实际graph调用把benchmark version_or_subset放在source内部，�
 ## 三组件冻结回归完成
 
 当前共享树最终全仓146项14.403秒通过，exit0，developer-full-frozen.log；这是开发冻结验证，尚不计正式review。后续固定远端提交后由root独立审阅。
+
+## 独立审阅 R1：通过
+
+固定远端提交 `6a737f3879d5665f607e6f7c4376cc5d1b439aa6`，tree `3dac3cec26cd203a32d2dbcbc9d5a63c1323df90`，覆盖整个 base `7ff332f659d456e2f4403421cdfcf5c6d5b906d2`..head。main仍为 `fc114851d5017aed7c8d5477b58b2ff8dac6bbfa`，草稿PR1未合并。root未实现生产代码，独立检查全部生产diff和相关调用路径；三开发者自测仅作导航。
+
+需求结论：新job业务门槛读取命名选项概率，confidence仅审计；成员只在明确not_belongs且P>0.7时排除。元数据仅在本地关联/审计，必要角色、版本/子集、直接证据保留。原生API、preparation二次gate、graph持久化与validator统一判据。旧配置缺metric仍恢复confidence，缺resolution仍0.05；显式新值固定并恢复，不能覆盖已有job。未改变候选集合、HNSW k、向量、算法、独立节点及完整性非阻塞规则。
+
+独立全仓146项13.334秒通过，exit0，`logs/review-r1-full.log`。独立HTTP拦截验收 `offline_acceptance.py` 通过，exit0，23个本地模拟请求：原生适配器→准备审核→快照、合成3篇图→外部命名提交→领域审核→物化/索引→只读validator→重开恢复全链路通过。使用合成向量，resolution0.3仅验证参数传递和恢复，绝非原样本参数对照。另验证低confidence/.76正概率通过、.69不通过、历史confidence模式、.7/.700001严格排除边界、Unicode拆包后关联。原样本6个受保护文件sha256全部相同。0真实API请求、0原样本重跑。
+
+### 输入共享与访问范围证据
+
+| 公开路径 | 必要输入/内部范围 | 独立实测 | 一致性与边界 |
+| --- | --- | --- | --- |
+| review_items→_projection→JevClient.decide→HTTP序列化 | 本批8条语义条目+同篇原文；来源/指纹仍由既有代码读取校验 | 冷/热包相同，正文5239字节，source1份；每条无关URL扩大到约160KB，包体不变 | 角色/子集保留；ID/hash不进入模型；不宣称减少DB内部读量 |
+| judge_pairs→_projection→JevClient.decide | A与20近邻，共21对象20题 | 包体15413字节；A仅一份 | 嵌套source版本S保留；不新增210对比较；原pairID本地映射 |
+| 大型Unicode pair批次→拆包→并发消费 |25对，本批必要语义 |9个HTTP模拟包，每个≤24题、state≤40000字符、body≤60000UTF8字节 | 每包重建索引；25结果原顺序/原绑定；超大单条显式错误由定向回归覆盖 |
+| 准备/图→原生适配器→持久化→validator/restore |合成1篇准备、3篇图 |全链路通过 |新metric/resolution恢复；raw概率审计核对；原样本未写入 |
+
+此变更没有修改数据库查询形状、长期缓存或向量索引访问策略，DB EXPLAIN/PROFILE专项不适用本次输入投影修改；现有全仓局部查询反例继续通过。共享注册表仅存活于单请求，拆包重建，无跨版本缓存失效。数据读取/原文证据校验未删减。数值是本地合成包体证据，不是实际token、API时延或准确率收益。
+
+剩余问题：本轮没有确认阻塞代码缺陷。验收脚本初稿错误读取counts.accepted/顶层passed，按既有返回结构改为counts.ready/structural.passed后通过，属于验收脚本自身修正，无生产代码变化，不消耗额外正式review轮次。已记录的历史低召回、漏归一、粗领域是否改善仍未验证；细分参数尚未选定，兼容默认0.05保持。需要你另行授权后才用之前60篇来源的已清洗数据重建及比较，发现效果问题先与你商量。
+
+下一步仅持久化审阅证据及最终提交核对；不触发样本测试或main合并。
+
+证据检查器仅因未授权main合并返回BLOCKED（exit2）；测试/审阅门槛无其他阻塞。这不影响代码交付，本轮不请求或执行合并。
