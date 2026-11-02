@@ -179,4 +179,3 @@ class ProjectionTests(unittest.TestCase):
             self.assertFalse(any(e[1]=='SAME' for e in self.driver.edges))
 
 if __name__=='__main__':unittest.main()
-
