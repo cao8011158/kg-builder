@@ -407,7 +407,8 @@ def _run(items, client, make, consume, *, category=None, context_format='explici
                         .replace('state.items[INDEX].name', 'state.groups[state.items[INDEX].group].name')
                         .replace('state.items[INDEX].description', 'state.groups[state.items[INDEX].group].description')
                         .replace('state.items[INDEX].kind', 'state.groups[state.items[INDEX].group].kind' if category in ('group', 'member') else 'state.items[INDEX].kind'))
-                instruction = instruction.replace('state.items[INDEX]', f'state.items[{index}]')
+                if category != 'whole_member':
+                    instruction = instruction.replace('state.items[INDEX]', f'state.items[{index}]')
                 if category and category != 'whole_member' and context_format == 'explicit-v1':
                     instruction = _explicit_instruction(instruction, state, index, category)
                 targeted['instructions'] = prefix + instruction

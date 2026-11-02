@@ -379,7 +379,8 @@ class ProbabilityProjectionTests(unittest.TestCase):
         self.assertEqual(client.calls,[])
 
     def test_whole_group_preserves_path_shaped_target_evidence(self):
-        literal='The source literally says state.candidate_groups[GROUP].members and TARGET_MEMBER.'
+        literal=('The source literally says state.candidate_groups[GROUP].members, '
+                 'state.items[INDEX], and TARGET_MEMBER.')
         member={'mention_id':'m','name':'A','description':literal,'source':{}}
         item={'membership_id':'g:m','group_id':'g','kind':'Method',
               'name':'ignored','description':'ignored','member':member}
