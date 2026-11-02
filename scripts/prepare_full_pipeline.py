@@ -38,14 +38,14 @@ def main(argv=None):
         kw={k:getattr(a,k) for k in ('batch_size','jev_concurrency','generation_concurrency','scope_workers',
               'review_workers','lease_seconds','repair_limit','item_max_reviews','jev_model')}
         kw['min_confidence']=a.min_probability
-        if a.plan:kw['plan']=json.loads(a.plan.read_text())
+        if a.plan:kw['plan']=json.loads(a.plan.read_text(encoding='utf-8'))
     wf=FullPreparationWorkflow(a.run_dir,run_id=a.run_id,**kw)
     if a.command=='run':result=asyncio.run(wf.run())
     elif a.command=='claim':
         result=wf.claim(a.kind,a.limit,a.worker)
         a.output.parent.mkdir(parents=True,exist_ok=True)
-        a.output.write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
-    elif a.command=='submit':result=wf.submit(json.loads(a.input.read_text()))
+        a.output.write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+    elif a.command=='submit':result=wf.submit(json.loads(a.input.read_text(encoding='utf-8')))
     elif a.command=='snapshot':
         if a.cache_dir:
             from kg_builder.embeddings import EmbeddingModel

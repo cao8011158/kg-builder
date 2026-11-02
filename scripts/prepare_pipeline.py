@@ -48,8 +48,8 @@ def main(argv=None):
     elif a.command=='claim':
         result=wf.claim(a.kind,a.limit,a.worker)
         a.output.parent.mkdir(parents=True,exist_ok=True)
-        a.output.write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
-    elif a.command=='submit':result=wf.submit(json.loads(a.input.read_text()))
+        a.output.write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+    elif a.command=='submit':result=wf.submit(json.loads(a.input.read_text(encoding='utf-8')))
     elif a.command=='snapshot':
         if a.cache_dir:
             from kg_builder.embeddings import EmbeddingModel

@@ -778,7 +778,7 @@ class PreparationWorkflow:
         path=Path(output);path.parent.mkdir(parents=True,exist_ok=True)
         data=CANON(result)+'\n'
         if path.exists():
-            if path.read_text()==data:return result
+            if path.read_text(encoding='utf-8')==data:return result
             raise ValueError('Snapshot output already exists with different content')
         tmp=path.with_name(path.name+'.'+uuid.uuid4().hex+'.tmp')
         tmp.write_text(data,encoding='utf-8');os.replace(tmp,path)

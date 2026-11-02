@@ -58,7 +58,7 @@ def parse_page(source, raw, position, received=0):
 
 class FullPreparationWorkflow(PreparationWorkflow):
     def __init__(self, run_dir, *, plan=None, fetcher=None, **kwargs):
-        proposed=json.loads(PLAN.read_text()) if plan is None else plan
+        proposed=json.loads(PLAN.read_text(encoding='utf-8')) if plan is None else plan
         if proposed['schema']!='full-preparation-plan/1' or proposed['page_size']!=100:
             raise ValueError('Invalid full collection plan')
         self.fetcher=fetcher or fetch_page

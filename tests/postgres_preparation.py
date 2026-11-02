@@ -1,13 +1,95 @@
 """Preparation behavior against real PostgreSQL; run explicitly with KG_TEST_DATABASE_URL."""
 import asyncio
+import hashlib
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import threading
 import time
 from unittest.mock import patch
 
 from kg_builder.preparation import PreparationWorkflow, snapshot_digest
 from tests.postgres_fixtures import PostgresCase, source, draft, Embedding, scope, review
+
+
+class Utf8FileBoundaryTests(PostgresCase):
+    """Exercise real UTF-8 files across PostgreSQL workflows and public CLIs."""
+
+    def _unicode_source(self,n):
+        row=source(n)
+        row['title']='Mémoire 中文 😀'
+        row['abstract']='Étude 中文 😀 about agent memory.'
+        return row
+
+    def _cli(self,script,run_dir,run_id,*arguments):
+        env=os.environ.copy()
+        env['KG_DATABASE_URL']=self.database_url
+        env['PYTHONPATH']=str(Path(__file__).resolve().parents[1]/'src')
+        # CLI stdout supports emoji, without changing default file encoding.
+        env['PYTHONIOENCODING']='utf-8'
+        return subprocess.run([sys.executable,str(Path(__file__).resolve().parents[1]/'scripts'/script),
+            '--run-dir',str(run_dir),'--run-id',run_id,*map(str,arguments)],
+            env=env,capture_output=True,text=True,encoding='utf-8',timeout=30)
+
+    def test_repeated_snapshot_preserves_utf8_bytes_and_mtime(self):
+        row=self._unicode_source(411)
+        wf=self.workflow(PreparationWorkflow,self.tmp.name,target=1,client=object(),
+            scope_fn=scope,review_fn=review,embedding=Embedding(),review_policy='legacy-paper')
+        wf.add_source(row,'arxiv','unicode-test','agent_memory')
+        wf._scope_batch();task=wf.claim('extract',1,'unicode-worker')[0]
+        result=draft(task)
+        result['contributions'][0]['description']='Étude 中文 😀 agent memory.'
+        wf.submit([dict(task_id=task['task_id'],input_hash=task['input_hash'],
+                        lease_token=task['lease_token'],result=result)])
+        wf._review_batch()
+        with wf.store.transaction() as db:db.execute("UPDATE run SET collection_state='sealed' WHERE id=1")
+        asyncio.run(wf.run(collect=False,poll_seconds=.01))
+        output=Path(self.tmp.name)/'unicode-snapshot.json'
+        first=wf.snapshot(output)
+        before=output.read_bytes();mtime=output.stat().st_mtime_ns
+        self.assertIn('Mémoire 中文 😀'.encode('utf-8'),before)
+        second=wf.snapshot(output)
+        self.assertEqual(first['snapshot_hash'],second['snapshot_hash'])
+        self.assertEqual(before,output.read_bytes())
+        self.assertEqual(mtime,output.stat().st_mtime_ns)
+        self.assertEqual(hashlib.sha256(before).digest(),hashlib.sha256(output.read_bytes()).digest())
+
+    def test_both_public_clis_claim_submit_and_export_unicode(self):
+        from kg_builder.full_preparation import FullPreparationWorkflow
+        for index,(script,full) in enumerate((('prepare_pipeline.py',False),('prepare_full_pipeline.py',True))):
+            with self.subTest(script=script):
+                run_dir=Path(self.tmp.name)/('full' if full else 'bounded')
+                cls=FullPreparationWorkflow if full else PreparationWorkflow
+                kw=dict(client=object(),scope_fn=scope,review_fn=review,review_policy='item-v1')
+                if not full:kw['target']=1
+                wf=self.workflow(cls,run_dir,**kw)
+                row=self._unicode_source(501+index)
+                if full:wf._admit_full(row,'arxiv')
+                else:wf.add_source(row,'arxiv','unicode-test','agent_memory')
+                wf._scope_batch()
+                run_id=wf.store.run_id
+                output=run_dir/'unicode-claims.json'
+                claimed=self._cli(script,run_dir,run_id,'claim','--worker','unicode-worker','--output',output)
+                self.assertEqual(claimed.returncode,0,claimed.stderr)
+                self.assertIn('Mémoire 中文 😀'.encode('utf-8'),output.read_bytes())
+                task=json.loads(output.read_text(encoding='utf-8'))[0]
+                result=draft(task);result['contributions']=[]
+                result['extractor_version']='unicode-Étude-中文-😀'
+                input_path=run_dir/'unicode-submit.json'
+                input_path.write_text(json.dumps([dict(task_id=task['task_id'],input_hash=task['input_hash'],
+                    lease_token=task['lease_token'],result=result)],ensure_ascii=False),encoding='utf-8')
+                submitted=self._cli(script,run_dir,run_id,'submit','--input',input_path)
+                self.assertEqual(submitted.returncode,0,submitted.stderr)
+                self.assertEqual(json.loads(submitted.stdout)[0]['status'],'accepted')
+                wf._review_batch()
+                with wf.store.transaction() as db:db.execute("UPDATE run SET collection_state='sealed' WHERE id=1")
+                asyncio.run(wf.run(collect=False,poll_seconds=.01))
+                snapshot=run_dir/'unicode-cli-snapshot.json'
+                exported=self._cli(script,run_dir,run_id,'snapshot','--output',snapshot)
+                self.assertEqual(exported.returncode,0,exported.stderr)
+                self.assertTrue(snapshot.exists())
 
 
 class PreparationTests(PostgresCase):
