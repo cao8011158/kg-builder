@@ -9,6 +9,7 @@ import sqlite3
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import closing
 from pathlib import Path
 
 from .extraction_validation import validate_extraction, RETRIEVAL_SCHEMA_VERSION
@@ -94,9 +95,42 @@ def _paper(papers, extraction):
     return p
 
 
+def domain_group_projection(group, audits, mention_rows, model_id):
+    """Pure bounded projection shared by incremental graph and SQLite retrieval."""
+    entities=[];assignments=[];areas=[];memberships=[]
+    mids=json.loads(group['members_json']);kind=group['kind']
+    if kind!='ResearchProblem' or len(mids)>=2:
+        if set(audits)!=set(mids):raise ValueError('Missing member review before materialization')
+    def add_entity(selected):
+        selected=sorted(selected);representative=mention_rows[selected[0]]
+        eid='entity:'+digest([kind,selected])[:32]
+        name=representative['name']
+        entities.append({'entity_id':eid,'kind':kind,'name':name,'description':representative['description'],
+                         'aliases':sorted({mention_rows[mid]['name'] for mid in selected}-{name}),'name_origin':'source_authored'})
+        for mid in selected:
+            m=mention_rows[mid]
+            assignments.append({'mention_id':mid,'model_id':model_id,
+                'precondition':digest([mid,m['source_hash'],m['mention_hash'],model_id]),
+                'candidate_revisions':{},'decision':'new_entity','entity_id':eid})
+    kept=[mid for mid in mids if not audits.get(mid,0)]
+    if kind=='ResearchProblem':
+        for mid in mids:add_entity([mid])
+        if len(mids)>=2 and kept:
+            area_id='area:'+digest([group['group_id']])[:32]
+            areas.append({'area_id':area_id,'name':group['name'],'description':group['description']})
+            memberships.extend({'area_id':area_id,'mention_id':mid} for mid in kept)
+    else:
+        if kept:add_entity(kept)
+        for mid in mids:
+            if audits[mid]:add_entity([mid])
+    return entities,assignments,areas,memberships
+
+
 class SnapshotGraph:
     def __init__(self, snapshot_path, job_dir, *, client=None, k=20, batch_size=32,
-                 name_mode='external', model=None, lease_seconds=900, namer=None, name_base_url=None, name_model=None, read_input=True, embedding_cache_dir=None, name_concurrency=3, graph_policy=None, problem_resolution=None, context_format=None, entity_same_min_probability=None):
+                 name_mode='external', model=None, lease_seconds=900, namer=None, name_base_url=None, name_model=None, read_input=True, embedding_cache_dir=None, name_concurrency=3, graph_policy=None, problem_resolution=None, context_format=None, entity_same_min_probability=None, publisher=None, voyage_options=None):
+        self.voyage_options = voyage_options or {}
+        self.publisher = publisher
         self.snapshot_path = Path(snapshot_path).resolve()
         self.job_dir = Path(job_dir).resolve()
         self.job_dir.mkdir(parents=True, exist_ok=True)
@@ -135,6 +169,8 @@ class SnapshotGraph:
         self.db.execute('PRAGMA journal_mode=WAL')
         self.db.executescript('''
         CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS graph_outbox(event_id TEXT PRIMARY KEY,kind TEXT NOT NULL,key TEXT NOT NULL,payload_json TEXT NOT NULL,delivered INTEGER NOT NULL DEFAULT 0);
+        CREATE INDEX IF NOT EXISTS graph_outbox_pending ON graph_outbox(delivered,event_id);
         CREATE TABLE IF NOT EXISTS stage(name TEXT PRIMARY KEY,seconds REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS jev_requests(request_id TEXT PRIMARY KEY,request_duration REAL,total_elapsed REAL,attempts INTEGER,model TEXT,usage_json TEXT,started_at REAL,finished_at REAL,http_intervals_json TEXT);
         CREATE TABLE IF NOT EXISTS candidates(pair_id TEXT PRIMARY KEY,kind TEXT NOT NULL,left_id TEXT NOT NULL,right_id TEXT NOT NULL,similarity REAL NOT NULL,decision TEXT NOT NULL DEFAULT 'unjudged',audit TEXT);
@@ -222,6 +258,84 @@ class SnapshotGraph:
             self.db.close()
             raise ValueError('Embedding model differs from snapshot')
 
+        if self.publisher is not None:
+            if self.graph_policy != 'domain-v1':raise ValueError('Neo4j publishing requires domain-v1')
+            if not self._meta('neo4j_run_id'):
+                if saved:raise ValueError('Enable Neo4j only for a fresh graph job')
+                with self.db:self._set_meta('neo4j_run_id','graph:'+uuid.uuid4().hex)
+        elif self._meta('neo4j_run_id') and read_input:
+            raise ValueError('This graph job requires its Neo4j publisher')
+
+    def _enqueue(self, kind, key, payload):
+        if self.publisher is None:return
+        event_id=kind+':'+key
+        payload={**payload,'event_id':event_id}
+        encoded=json.dumps(payload,ensure_ascii=False,sort_keys=True)
+        previous=self.db.execute('SELECT payload_json FROM graph_outbox WHERE event_id=?',(event_id,)).fetchone()
+        if previous and previous[0]!=encoded:raise ValueError('Immutable graph projection event changed')
+        inserted=self.db.execute('INSERT OR IGNORE INTO graph_outbox(event_id,kind,key,payload_json) VALUES(?,?,?,?)',(event_id,kind,key,encoded))
+        if inserted.rowcount:self._set_meta('neo4j_event_count',str(int(self._meta('neo4j_event_count') or 0)+1))
+
+    def _drain(self):
+        if self.publisher is None:return
+        if self.db.in_transaction:raise RuntimeError('Cannot publish before SQLite commit')
+        while True:
+            rows=self.db.execute('SELECT event_id,payload_json FROM graph_outbox WHERE delivered=0 ORDER BY event_id LIMIT ?', (self.batch_size,)).fetchall()
+            if not rows:return
+            for row in rows:
+                started=time.time();wall=time.perf_counter()
+                with self.db:self._set_meta('neo4j_delivery_attempts',str(int(self._meta('neo4j_delivery_attempts') or 0)+1))
+                try:self.publisher.publish(self._meta('neo4j_run_id'),json.loads(row['payload_json']))
+                finally:
+                    with self.db:self._set_meta('neo4j_delivery_wall_seconds',str(float(self._meta('neo4j_delivery_wall_seconds') or 0)+time.perf_counter()-wall))
+                with self.db:
+                    ack=self.db.execute('UPDATE graph_outbox SET delivered=1 WHERE event_id=? AND delivered=0',(row['event_id'],))
+                    if ack.rowcount:self._set_meta('neo4j_delivered_count',str(int(self._meta('neo4j_delivered_count') or 0)+1))
+                    if not self._meta('neo4j_first_delivery_at'):self._set_meta('neo4j_first_delivery_at',str(started))
+                    kind=json.loads(row['payload_json'])['event_id'].split(':',1)[0]
+                    if not self._meta('neo4j_first_'+kind+'_delivery_at'):self._set_meta('neo4j_first_'+kind+'_delivery_at',str(started))
+                    self._set_meta('neo4j_latest_delivery_at',str(time.time()))
+
+    def _enqueue_group(self, group_id, store):
+        if self.publisher is None:return
+        group=self.db.execute('SELECT * FROM groups WHERE group_id=?',(group_id,)).fetchone()
+        mids=json.loads(group['members_json'])
+        audits={r['mention_id']:r['excluded'] for r in self.db.execute('SELECT mention_id,excluded FROM member_reviews WHERE group_id=?',(group_id,))}
+        if (group['kind']!='ResearchProblem' or len(mids)>=2) and set(audits)!=set(mids):return
+        if group['kind']=='ResearchProblem' and len(mids)>=2 and not self.db.execute("SELECT 1 FROM tasks WHERE group_id=? AND status='done'",(group_id,)).fetchone():return
+        mention_rows={mid:dict(store.db.execute('SELECT m.*,s.source_hash FROM mentions m JOIN sources s ON s.extraction_id=m.extraction_id WHERE m.mention_id=?',(mid,)).fetchone()) for mid in mids}
+        entities,assignments,areas,memberships=domain_group_projection(group,audits,mention_rows,store.model.model_id if store.model else None)
+        from .neo4j_store import node,edge
+        nodes=[node(e['entity_id'],e['kind'],name=e['name'],description=e['description'],aliases=e['aliases'],name_origin=e['name_origin']) for e in entities]
+        nodes.extend(node(a['area_id'],'ResearchArea',name=a['name'],description=a['description']) for a in areas)
+        edges=[edge(a['mention_id'],a['entity_id'],'RESOLVES_TO') for a in assignments]
+        # Areas contain distinct RP entities, never merge them.
+        resolved={a['mention_id']:a['entity_id'] for a in assignments}
+        edges.extend(edge(resolved[m['mention_id']],m['area_id'],'MEMBER_OF') for m in memberships)
+        self._enqueue('group',group_id,{'nodes':nodes,'edges':edges})
+
+    def _enqueue_source(self, store, extraction_id, prepared_paper):
+        from .neo4j_store import node,edge
+        source=dict(store.db.execute('SELECT * FROM sources WHERE extraction_id=?',(extraction_id,)).fetchone())
+        pid,vid=source['paper_id'],source['version_id']
+        sid='source:'+extraction_id
+        nodes=[node(pid,'Paper',title=source['title']),node(vid,'PaperVersion',version_label=source['version_label'],source_url=source['source_url'],text=prepared_paper['text'],prepared_source_hash=prepared_paper['source_hash']),node(sid,'Source',**source,snapshot_hash=self.snapshot['snapshot_hash'],review_metadata=self.snapshot.get('review_metadata',{}).get(pid,{}))]
+        edges=[edge(pid,vid,'HAS_VERSION'),edge(vid,sid,'HAS_SOURCE')]
+        for row in store.db.execute('SELECT * FROM mentions WHERE extraction_id=? ORDER BY mention_id',(extraction_id,)):
+            nodes.append(node(row['mention_id'],'SourceItem',kind=row['kind'],name=row['name'],description=row['description'],roles=json.loads(row['role_json']),version_or_subset=row['version_or_subset'],source_json=row['source_json'],mention_hash=row['mention_hash']))
+            edges.append(edge(sid,row['mention_id'],'HAS_ITEM'))
+            if row['kind']=='ResearchProblem':
+                mention=dict(row);mention['source_hash']=source['source_hash']
+                singleton={'members_json':json.dumps([row['mention_id']]),'kind':'ResearchProblem'}
+                entities,assignments,_,_=domain_group_projection(singleton,{}, {row['mention_id']:mention},None)
+                e=entities[0]
+                nodes.append(node(e['entity_id'],'ResearchProblem',name=e['name'],description=e['description'],aliases=e['aliases'],name_origin=e['name_origin']))
+                edges.append(edge(row['mention_id'],e['entity_id'],'RESOLVES_TO'))
+        for row in store.db.execute('SELECT * FROM contributions WHERE extraction_id=? ORDER BY contribution_id',(extraction_id,)):
+            nodes.append(node(row['contribution_id'],'Contribution',description=row['description'],source_json=row['source_json']))
+            edges.append(edge(sid,row['contribution_id'],'HAS_ITEM'))
+        self._enqueue('source',extraction_id,{'nodes':nodes,'edges':edges})
+
     def close(self):
         self.db.close()
 
@@ -234,10 +348,12 @@ class SnapshotGraph:
 
     def _timed(self, name, fn):
         start = time.perf_counter()
+        cpu = time.process_time()
         result = fn()
         with self.db:
             self.db.execute('INSERT INTO stage VALUES(?,?) ON CONFLICT(name) DO UPDATE SET seconds=seconds+excluded.seconds',
                             (name, time.perf_counter()-start))
+            self.db.execute('INSERT INTO stage VALUES(?,?) ON CONFLICT(name) DO UPDATE SET seconds=seconds+excluded.seconds',('process_cpu:'+name,time.process_time()-cpu))
         return result
 
     def _record_requests(self, result):
@@ -334,6 +450,13 @@ class SnapshotGraph:
                 raise ValueError('Every semantic mention requires one compatible vector/model')
             if self.model and model_ids and model_ids != {self.model.model_id}:
                 raise ValueError('Embedding model differs from snapshot')
+            if self.publisher is not None:
+                for eid in ids:
+                    with self.db:
+                        paper_id=store.db.execute('SELECT paper_id FROM sources WHERE extraction_id=?',(eid,)).fetchone()[0]
+                        self._enqueue_source(store,eid,papers[paper_id])
+                        self._set_meta('source_published:'+eid,'queued')
+                    self._drain()
             with self.db:
                 self._set_meta('model_id', next(iter(model_ids), ''))
                 self._set_meta('phase', 'imported')
@@ -526,6 +649,8 @@ class SnapshotGraph:
                             raise ValueError('Member exclusion disagrees with strict policy')
                         self.db.execute('INSERT INTO member_reviews VALUES(?,?,?,?)',
                                         (item['group_id'],item['member']['mention_id'],int(result['excluded']),json.dumps(result,sort_keys=True)))
+                    for gid in {item['group_id'] for item in batch}:self._enqueue_group(gid,store)
+                self._drain()
             with self.db:
                 for g in groups:
                     self.db.execute("UPDATE groups SET review='accepted' WHERE group_id=?",(g['group_id'],))
@@ -533,6 +658,8 @@ class SnapshotGraph:
                         self.db.execute("INSERT OR IGNORE INTO tasks(task_id,group_id,status,queued_at) VALUES(?,?,'queued',?)",
                                         ('name:'+g['group_id'],g['group_id'],time.time()))
                 self._set_meta('phase','grouped')
+                for g in groups:self._enqueue_group(g['group_id'],store)
+            self._drain()
         finally:store.close()
 
     def _strict_exclusion(self, result):
@@ -552,11 +679,13 @@ class SnapshotGraph:
                 raise ValueError('Member probability disagrees with raw Jev answer')
         return result.get('choice')=='not_belongs' and value>0.7
 
-    def _review_area_members(self):
+    def _review_area_members(self, group_id=None):
         """Judge area membership only against the actual generated area summary."""
         from .decision_api import review_group_members
         groups=self.db.execute("""SELECT g.* FROM groups g JOIN tasks t ON t.group_id=g.group_id
-            WHERE g.kind='ResearchProblem' AND t.status='done' ORDER BY g.group_id""").fetchall()
+            WHERE g.kind='ResearchProblem' AND t.status='done'""" +
+            (' AND g.group_id=?' if group_id is not None else '')+' ORDER BY g.group_id',
+            (group_id,) if group_id is not None else ()).fetchall()
         if not groups:return
         store=SemanticStore(self.job_dir/'semantic.sqlite')
         try:
@@ -586,6 +715,8 @@ class SnapshotGraph:
                         result={**result,'area_revision':digest([item['name'],item['description']])}
                         self.db.execute('INSERT INTO member_reviews VALUES(?,?,?,?)',
                                         (item['group_id'],item['member']['mention_id'],int(result['excluded']),json.dumps(result,sort_keys=True)))
+                    for gid in {item['group_id'] for item in batch}:self._enqueue_group(gid,store)
+                self._drain()
         finally:store.close()
 
     def claim(self, worker, limit=5):
@@ -615,6 +746,8 @@ class SnapshotGraph:
         return out
 
     def submit(self, submissions):
+        if self._meta('neo4j_run_id') and self.publisher is None:raise ValueError('Neo4j publisher required to submit results')
+        self._drain()
         if not isinstance(submissions,list):raise ValueError('Expected list of name submissions')
         results=[]
         for item in submissions:
@@ -647,6 +780,10 @@ class SnapshotGraph:
                 self.db.execute('UPDATE groups SET name=?,description=? WHERE group_id=?',(value['name'],value['description'],row['group_id']))
                 self.db.commit();results.append({'task_id':row['task_id'],'status':'done'})
             except BaseException:self.db.rollback();raise
+        if self.graph_policy=='domain-v1' and self.publisher is not None:
+            for submission in submissions:
+                row=self.db.execute('SELECT group_id FROM tasks WHERE task_id=?',(submission['task_id'],)).fetchone()
+                self._review_area_members(row['group_id'])
         return results
 
     def _api_names(self):
@@ -669,6 +806,7 @@ class SnapshotGraph:
                     try:
                         result=future.result()
                         self.submit([{**{key:task[key] for key in ('task_id','lease_token','input_hash')},'result':result}])
+
                     except BaseException as exc:
                         if failure is None:failure=exc
                         # Release only this call's own lease, so recovery does not wait
@@ -713,38 +851,14 @@ class SnapshotGraph:
             entities=[];assignments=[];areas=[];memberships=[]
             mention_rows={r['mention_id']:dict(r) for r in store.db.execute('''SELECT m.mention_id,m.name,m.description,m.mention_hash,
                 m.kind,s.source_hash FROM mentions m JOIN sources s ON s.extraction_id=m.extraction_id''')}
-            def add_entity(kind,mids):
-                mids=sorted(mids)
-                representative=mention_rows[mids[0]]
-                name=representative['name'];description=representative['description']
-                eid='entity:'+digest([kind,mids])[:32]
-                names={mention_rows[mid]['name'] for mid in mids}
-                entities.append({'entity_id':eid,'kind':kind,'name':name,'description':description,
-                                 'aliases':sorted(names-{name}),'name_origin':'source_authored'})
-                for mid in mids:
-                    m=mention_rows[mid]
-                    assignments.append({'mention_id':mid,'model_id':store.model.model_id if store.model else None,
-                                        'precondition':digest([mid,m['source_hash'],m['mention_hash'],store.model.model_id if store.model else None]),
-                                        'candidate_revisions':{},'decision':'new_entity','entity_id':eid})
             covered=set()
             for group in groups:
-                mids=json.loads(group['members_json']);kind=group['kind']
+                mids=json.loads(group['members_json'])
                 audits={r['mention_id']:r['excluded'] for r in self.db.execute('SELECT mention_id,excluded FROM member_reviews WHERE group_id=?',(group['group_id'],))}
-                if kind!='ResearchProblem' or len(mids)>=2:
-                    if set(audits)!=set(mids):raise ValueError('Missing member review before materialization')
                 if covered.intersection(mids):raise ValueError('Mention appears in more than one group')
                 covered.update(mids)
-                kept=[mid for mid in mids if not audits.get(mid,0)]
-                if kind=='ResearchProblem':
-                    for mid in mids:add_entity(kind,[mid])
-                    if len(mids)>=2 and kept:
-                        area_id='area:'+digest([group['group_id']])[:32]
-                        areas.append({'area_id':area_id,'name':group['name'],'description':group['description']})
-                        memberships.extend({'area_id':area_id,'mention_id':mid} for mid in kept)
-                else:
-                    if kept:add_entity(kind,kept)
-                    for mid in mids:
-                        if audits[mid]:add_entity(kind,[mid])
+                projection=domain_group_projection(group,audits,mention_rows,store.model.model_id if store.model else None)
+                entities.extend(projection[0]);assignments.extend(projection[1]);areas.extend(projection[2]);memberships.extend(projection[3])
             if covered!=set(mention_rows):raise ValueError('Graph groups do not cover all source mentions')
             review={'schema_version':REVIEW_VERSION,'review_id':'snapshot:'+self.snapshot['snapshot_hash'],
                     'entities':entities,'assignments':assignments}
@@ -792,9 +906,10 @@ class SnapshotGraph:
             model = self.model
         else:
             from .embeddings import embedding_model_from_id
-            model=embedding_model_from_id(model_id,cache_dir=self.embedding_cache_dir)
+            model=embedding_model_from_id(model_id,cache_dir=self.embedding_cache_dir, **self.voyage_options)
         if model.model_id!=model_id:
             raise ValueError('Provide an embedding model matching the frozen snapshot for retrieval indexes')
+        self.model=model
         return model
 
     def _build_indexes(self):
@@ -829,6 +944,8 @@ class SnapshotGraph:
         finally:store.close()
 
     def run(self):
+        if self._meta('neo4j_run_id') and self.publisher is None:raise ValueError('Neo4j publisher required to run this job')
+        self._drain()
         phase=self._meta('phase')
         if phase=='new':self._timed('snapshot_import_cpu',self._prepare_store);phase='imported'
         if phase=='imported':self._timed('candidate_graph_cpu',self._candidates);phase='candidates'
@@ -839,12 +956,13 @@ class SnapshotGraph:
             phase='grouped'
         if phase=='grouped':
             if self.name_mode=='api':self._timed('name_api_wall',self._api_names)
-            if not self.db.execute("SELECT 1 FROM tasks WHERE status!='done' LIMIT 1").fetchone():
-                if self.graph_policy=='legacy':self._timed('jev_final_name_wall',self._final_name_review)
-                else:self._timed('jev_area_member_wall',self._review_area_members)
+            if self.graph_policy=='domain-v1':self._timed('jev_area_member_wall',self._review_area_members)
+            elif not self.db.execute("SELECT 1 FROM tasks WHERE status!='done' LIMIT 1").fetchone():
+                self._timed('jev_final_name_wall',self._final_name_review)
             self._timed('materialize_cpu',self._materialize_domain if self.graph_policy=='domain-v1' else self._materialize)
         if self._meta('phase')=='complete' and self._meta('index_status')!='verified':
             self._timed('retrieval_index_cpu',self._build_indexes)
+        self._drain()
         if self._meta('phase')=='complete' and self._meta('index_status')=='verified' and not self._meta('completed_at'):
             with self.db:self._set_meta('completed_at',str(time.time()))
         return self.status()
@@ -881,15 +999,20 @@ class SnapshotGraph:
         memberships={r['excluded']:r['n'] for r in self.db.execute('SELECT excluded,count(*) n FROM member_reviews GROUP BY excluded')}
         area_count=0
         if store_path.exists() and self.graph_policy=='domain-v1' and self._meta('phase')=='complete':
-            with sqlite3.connect(store_path) as db:
+            with closing(sqlite3.connect(store_path)) as db:
                 area_count=db.execute('SELECT count(*) FROM research_areas').fetchone()[0]
-        return {'phase':self._meta('phase'),'graph_policy':self.graph_policy,'decision_metric':self.decision_metric,'context_format':self.context_format,
+        delivered=int(self._meta('neo4j_delivered_count') or 0)
+        projection={1:delivered,0:int(self._meta('neo4j_event_count') or 0)-delivered}
+        return {'neo4j_run_id':self._meta('neo4j_run_id'),'neo4j_projection':{'pending':projection.get(0,0),'delivered':projection.get(1,0),
+            'attempts':int(self._meta('neo4j_delivery_attempts') or 0),'delivery_wall_seconds':float(self._meta('neo4j_delivery_wall_seconds') or 0),
+            **{key:float(self._meta('neo4j_'+key)) if self._meta('neo4j_'+key) else None for key in ('first_delivery_at','first_source_delivery_at','first_group_delivery_at','latest_delivery_at')}},'phase':self._meta('phase'),'graph_policy':self.graph_policy,'decision_metric':self.decision_metric,'context_format':self.context_format,
                 'problem_resolution':self.problem_resolution,'entity_same_min_probability':self.entity_same_min_probability,
                 'snapshot_hash':self._meta('snapshot_hash'),
                 'research_areas':area_count,'retained_memberships':memberships.get(0,0),
                 'excluded_memberships':memberships.get(1,0),'identity_conflicts':json.loads(self._meta('identity_conflicts') or '[]'),
                 'candidate_pairs':counts,'groups':groups,'name_tasks':tasks,'mentions':mention_counts,
-                'stage_seconds':{r['name']:r['seconds'] for r in self.db.execute('SELECT * FROM stage')},
+                'stage_seconds':{r['name']:r['seconds'] for r in self.db.execute("SELECT * FROM stage WHERE name NOT LIKE 'process_cpu:%'")},
+                'stage_process_cpu_seconds':{r['name'][12:]:r['seconds'] for r in self.db.execute("SELECT * FROM stage WHERE name LIKE 'process_cpu:%'")},
                 'pending_pairs':counts.get('pending',0),'pending_groups':groups.get('pending',0),
                 'pending_mentions':mention_counts.get('pending',0),
                 'started_at':float(self._meta('started_at')) if self._meta('started_at') else None,

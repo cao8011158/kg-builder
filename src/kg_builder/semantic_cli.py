@@ -12,6 +12,9 @@ def main(argv=None):
     parser.add_argument('--embedding-provider',choices=['fastembed','voyage'],default='fastembed')
     parser.add_argument('--embedding-dimension',type=int,default=1024)
     parser.add_argument('--cache-dir',help='Local model cache directory')
+    parser.add_argument('--voyage-concurrency',type=int,default=8)
+    parser.add_argument('--voyage-rpm',type=int,default=2000)
+    parser.add_argument('--voyage-tpm',type=int,default=3000000)
     sub=parser.add_subparsers(dest='command',required=True)
     ingest=sub.add_parser('ingest');ingest.add_argument('--master',required=True)
     ingest.add_argument('--extraction-id',action='append',required=True)
@@ -37,9 +40,11 @@ def main(argv=None):
     if args.command in ('cluster-problems','export-candidates','search'):
         from .embeddings import create_embedding_model
         model=create_embedding_model(provider=args.embedding_provider,model_name=args.embedding_model,
-            dimension=args.embedding_dimension,cache_dir=args.cache_dir)
-    store=SemanticStore(args.sidecar,model=model)
+            dimension=args.embedding_dimension,cache_dir=args.cache_dir,max_concurrency=args.voyage_concurrency,
+            requests_per_minute=args.voyage_rpm,tokens_per_minute=args.voyage_tpm)
+    store=None
     try:
+        store=SemanticStore(args.sidecar,model=model)
         if args.command=='ingest': result=store.ingest(args.master,args.extraction_id)
         elif args.command=='cluster-problems':result=store.cluster_problems(
             k=args.k,min_similarity=args.min_similarity,resolution=args.resolution,seed=args.seed)
@@ -53,6 +58,10 @@ def main(argv=None):
             Path(args.output).write_text(output+'\n',encoding='utf-8')
             print(args.output)
         else:print(output)
-    finally:store.close()
+    finally:
+        try:
+            if store is not None:store.close()
+        finally:
+            if model is not None and hasattr(model,'close'):model.close()
 
 if __name__=='__main__':main()

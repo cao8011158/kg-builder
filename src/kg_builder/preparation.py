@@ -756,8 +756,11 @@ class PreparationWorkflow:
                 if self.embedding is None:
                     from .embeddings import EmbeddingModel
                     self.embedding=EmbeddingModel(cache_dir=os.getenv('FASTEMBED_CACHE_PATH'))
-                for start in range(0,len(entries),32):
-                    part=entries[start:start+32]
+                window=getattr(self.embedding,'encode_window_size',32)
+                if not isinstance(window,int) or isinstance(window,bool) or window < 1:
+                    raise ValueError('Positive embedding encode_window_size required')
+                for start in range(0,len(entries),window):
+                    part=entries[start:start+window]
                     encoded=self.embedding.encode([e[2] for e in part])
                     vectors.extend(dict(item_key=e[0],kind=e[1],text=e[2],model_id=self.embedding.model_id,
                                         vector=[float(v) for v in vec]) for e,vec in zip(part,encoded))

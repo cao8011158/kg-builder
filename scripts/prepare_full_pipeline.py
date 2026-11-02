@@ -34,6 +34,9 @@ def main(argv=None):
     snap.add_argument('--embedding-provider',choices=['fastembed','voyage'],default='fastembed')
     snap.add_argument('--embedding-model')
     snap.add_argument('--embedding-dimension',type=int,default=1024)
+    snap.add_argument('--voyage-concurrency',type=int,default=8)
+    snap.add_argument('--voyage-rpm',type=int,default=2000)
+    snap.add_argument('--voyage-tpm',type=int,default=3000000)
     a=p.parse_args(argv)
     kw={}
     if a.command=='run':
@@ -43,6 +46,7 @@ def main(argv=None):
         kw['min_confidence']=a.min_probability
         if a.plan:kw['plan']=json.loads(a.plan.read_text(encoding='utf-8'))
     wf=FullPreparationWorkflow(a.run_dir,run_id=a.run_id,**kw)
+    embedding=None
     try:
         if a.command=='run':result=asyncio.run(wf.run())
         elif a.command=='claim':
@@ -52,12 +56,16 @@ def main(argv=None):
         elif a.command=='submit':result=wf.submit(json.loads(a.input.read_text(encoding='utf-8')))
         elif a.command=='snapshot':
             from kg_builder.embeddings import create_embedding_model
-            wf.embedding=create_embedding_model(provider=a.embedding_provider,model_name=a.embedding_model,
-                dimension=a.embedding_dimension,cache_dir=a.cache_dir)
+            embedding=wf.embedding=create_embedding_model(provider=a.embedding_provider,model_name=a.embedding_model,
+                dimension=a.embedding_dimension,cache_dir=a.cache_dir,max_concurrency=a.voyage_concurrency,
+                requests_per_minute=a.voyage_rpm,tokens_per_minute=a.voyage_tpm)
             result=wf.snapshot(a.output)
             result=dict(snapshot_hash=result['snapshot_hash'],counts=result['counts'],output=str(a.output))
         else:result=wf.status()
         print(json.dumps(result,ensure_ascii=False,indent=2))
-    finally:wf.close()
+    finally:
+        try:wf.close()
+        finally:
+            if embedding is not None and hasattr(embedding,'close'):embedding.close()
 
 if __name__=='__main__':main()

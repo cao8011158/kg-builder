@@ -1,6 +1,6 @@
 # Research KG Builder
 
-Research paper discovery, versioned extraction and reviewed semantic retrieval for a scholarly Knowledge Graph. **The Neo4j graph writer is not implemented yet.**
+Research paper discovery, versioned extraction and reviewed semantic retrieval for a scholarly Knowledge Graph. Approved snapshot graph nodes and edges can be published incrementally to Neo4j with the official driver and an explicit `--neo4j` flag.
 
 ## Research scope
 
@@ -17,6 +17,7 @@ The corpus is a **candidate metadata pool** until a relevance review is performe
   `python scripts/prepare_pipeline.py --run-id fresh60 --run-dir /private/run60 run`.
   Reuse that logical ID for claim, submit, status and snapshot. Full pagination
   uses `scripts/prepare_full_pipeline.py`. See [PostgreSQL preparation](docs/POSTGRES_PREPARATION.md).
+- `scripts/build_snapshot_graph.py --snapshot <prepared.json> --job-dir <graph-job> --neo4j run` publishes approved domain graph events to Neo4j. Configure `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD` and optional `NEO4J_DATABASE` in the process environment. SQLite remains the graph job queue, audit and semantic cache; PostgreSQL remains preparation authority. See [embedding and graph configuration](docs/EMBEDDINGS.md).
 - The SQLite corpus commands below are historical explicit-path workflows; they
   do not feed a new PostgreSQL preparation run.
 - `scripts/collect_papers.py`: source search from OpenAlex, Semantic Scholar, and arXiv; candidate date gate, topic tagging and SQLite upsert. This CLI does **not** invoke any LLM.

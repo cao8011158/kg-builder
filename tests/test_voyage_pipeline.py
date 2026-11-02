@@ -86,7 +86,8 @@ class VoyagePipelineTests(unittest.TestCase):
                                  '--embedding-provider','voyage','--embedding-model','voyage-4-large',
                                  '--embedding-dimension','1024'])
                 factory.assert_called_once_with(provider='voyage',model_name='voyage-4-large',
-                                                dimension=1024,cache_dir=None)
+                                                dimension=1024,cache_dir=None,max_concurrency=8,
+                                                requests_per_minute=2000,tokens_per_minute=3000000)
                 self.assertIs(workflow.embedding,model)
 
     def test_semantic_cli_forwards_model_and_keeps_status_only_operations_offline(self):
