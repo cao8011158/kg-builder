@@ -113,12 +113,14 @@ class Neo4jCliTests(unittest.TestCase):
             def publish(self,run_id,payload):self.events[(run_id,payload['event_id'])]=payload
             def close(self):self.closes+=1
         publisher=Publisher();client=MagicMock();calls=[]
+        clock={'wall':100.0,'cpu':20.0}
         def clusters(vectors,**kwargs):
             mids=sorted(vectors)
             return {'clusters':[mids[:2],mids[2:]],'edges':[],'diagnostics':{'algorithm':'leiden-cpm'}}
         def reviewed(items,actual_client,**kwargs):
             self.assertIs(actual_client,client)
             calls.append(items)
+            clock['wall']+=7.0;clock['cpu']+=3.0
             return [member_result(item) for item in items]
         cli=script('build_snapshot_graph')
         with tempfile.TemporaryDirectory() as tmp:
@@ -130,6 +132,7 @@ class Neo4jCliTests(unittest.TestCase):
                 try:
                     job.run();tasks=job.claim('name-worker',2)
                     self.assertEqual(len(tasks),2)
+                    before_timing=job.status()
                 finally:job.close()
             task=tasks[0];submission=root/'name.json'
             submission.write_text(json.dumps([{**{key:task[key] for key in ('task_id','lease_token','input_hash')},
@@ -138,12 +141,17 @@ class Neo4jCliTests(unittest.TestCase):
             with patch('kg_builder.neo4j_store.Neo4jStore.from_env',return_value=publisher), \
                  patch('kg_builder.decision_api.JevClient',return_value=client) as create_client, \
                  patch('kg_builder.decision_api.review_group_members',side_effect=reviewed):
-                self.invoke(cli,argv)
+                with patch('kg_builder.snapshot_graph.time.perf_counter',side_effect=lambda:clock['wall']), \
+                     patch('kg_builder.snapshot_graph.time.process_time',side_effect=lambda:clock['cpu']):
+                    self.invoke(cli,argv)
                 create_client.assert_called_once_with(model='jev-1.14.0',max_concurrency=4)
                 self.assertEqual(len(calls),1)
                 self.assertEqual(len(calls[0]),2)
                 with closing(sqlite3.connect(root/'job'/'graph.sqlite')) as db:
                     self.assertEqual(db.execute("SELECT count(*) FROM tasks WHERE status!='done'").fetchone()[0],1)
+                    timing=dict(db.execute("SELECT name,seconds FROM stage WHERE name IN ('jev_area_member_wall','process_cpu:jev_area_member_wall')"))
+                    self.assertAlmostEqual(timing['jev_area_member_wall']-before_timing['stage_seconds'].get('jev_area_member_wall',0),7.0)
+                    self.assertAlmostEqual(timing['process_cpu:jev_area_member_wall']-before_timing['stage_process_cpu_seconds'].get('jev_area_member_wall',0),3.0)
                     before=db.execute('SELECT group_id,mention_id,audit FROM member_reviews WHERE group_id=? ORDER BY mention_id',(task['group_id'],)).fetchall()
                 self.assertEqual(len(before),2)
                 first_events=len(publisher.events)

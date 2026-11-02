@@ -783,7 +783,8 @@ class SnapshotGraph:
         if self.graph_policy=='domain-v1' and self.publisher is not None:
             for submission in submissions:
                 row=self.db.execute('SELECT group_id FROM tasks WHERE task_id=?',(submission['task_id'],)).fetchone()
-                self._review_area_members(row['group_id'])
+                group_id=row['group_id']
+                self._timed('jev_area_member_wall',lambda group_id=group_id:self._review_area_members(group_id))
         return results
 
     def _api_names(self):
