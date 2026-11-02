@@ -273,6 +273,9 @@ def _domain_validation(snapshot, job_dir, cases, model, graph, store, meta, ment
                        contributions, entities, groups, approved, sources, fail, failures, details, search):
     """Audit the domain policy's immutable proposals and final retained relationships."""
     metric=meta.get('decision_metric','confidence')
+    member_review_mode=meta.get('member_review_mode') or 'anchor-v1'
+    if member_review_mode not in ('anchor-v1','whole-group-v1'):
+        fail('invalid_member_review_mode')
     try:resolution=float(meta.get('problem_resolution',0.05))
     except (ValueError,TypeError):resolution=0.05
     group_members = Counter()
@@ -332,6 +335,7 @@ def _domain_validation(snapshot, job_dir, cases, model, graph, store, meta, ment
                  and score==probabilities['not_belongs'] and raw_answer.get('confidence')==confidence
                  and raw_answer.get('choice')==choice))
             if (audit.get('membership_id')!='membership:'+digest([gid,mid])[:32]
+                or audit.get('review_mode','anchor-v1')!=('anchor-v1' if group['kind']=='ResearchProblem' else member_review_mode)
                 or audit.get('excluded') is not expected_excluded or row['excluded'] not in (0,1)
                 or bool(row['excluded'])!=expected_excluded or choice not in ('belongs','not_belongs','insufficient')
                 or not valid_score or audit.get('decision_metric','confidence')!=metric or not raw_probability_valid
@@ -454,8 +458,7 @@ def _domain_validation(snapshot, job_dir, cases, model, graph, store, meta, ment
         left=mentions.get(pair['left_id']);right=mentions.get(pair['right_id'])
         if not left or not right or pair['kind'] not in ('Method','Benchmark') or left['kind']!=pair['kind'] or right['kind']!=pair['kind']:
             fail('invalid_identity_candidate',pair_id=pair['pair_id']);continue
-        if pair['decision']=='different' and left['entity_id']==right['entity_id']:
-            fail('different_pair_merged',pair_id=pair['pair_id'])
+        # Pair decisions remain audited; final identity follows member reviews.
         if pair['decision']=='same':parent[root(pair['right_id'])]=root(pair['left_id'])
         if pair['decision'] in ('pending','unjudged'):pending_pairs+=1
     components=defaultdict(list)

@@ -10,11 +10,11 @@ Research problems remain distinct source-grounded ResearchProblem nodes. Their w
 
 ## Second review is member exclusion
 
-For either entity components or research areas, Jev reviews individual members in the context of the group name/definition. For Method/Benchmark, membership means the same actual entity; for ResearchArea, membership means the thematic field, not identical concrete research objectives.
+Jev reviews individual members. For Method/Benchmark, the new `whole-group-v1` review shows the complete provisional component once in shared request state and asks whether each target matches its coherent dominant concrete identity; no member is designated as representative. For ResearchArea, review still uses the externally generated area name/definition and asks for thematic membership, not identical concrete research objectives. Historical `anchor-v1` member reviews keep their recorded interpretation.
 
 A member is excluded only if Jev selects `not_belongs` AND P(not_belongs) is strictly greater than 0.7 for probability-mode jobs. Exactly 0.7, lower negative probability, `belongs`, and `insufficient` are retained. No extra group-wide approval gate is added. Technical errors are recorded and stop a stage for recovery; they are not fabricated semantic answers.
 
-Exclusion removes the group relationship, not the source item. Excluded methods/benchmarks and unmatched items materialize as independent source-authored nodes. Every original research problem remains a distinct searchable node even if it has no area. Uncertain identity relations remain audited and do not hide approved content from search. Explicit contradictory identity constraints are reported for a user decision rather than silently discarded.
+Exclusion removes the group relationship, not the source item. Excluded methods/benchmarks and unmatched items materialize as independent source-authored nodes. Every original research problem remains a distinct searchable node even if it has no area. Uncertain identity relations remain audited and do not hide approved content from search. Explicit `different` decisions inside a provisional `same` component remain in the pair audit and `identity_conflicts` diagnostic. They do not stop the graph: Jev's individual member review decides retention under the strict exclusion rule above. The job records `identity_conflict_policy=member_review_v1` when this stage runs.
 
 ## Persistence and evaluation
 

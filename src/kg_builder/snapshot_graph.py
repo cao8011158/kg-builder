@@ -143,7 +143,7 @@ class SnapshotGraph:
             raise
 
     def _initialize(self, snapshot_path, job_dir, *, client=None, k=20, batch_size=32,
-                 name_mode='external', model=None, lease_seconds=1800, namer=None, name_base_url=None, name_model=None, read_input=True, embedding_cache_dir=None, name_concurrency=3, graph_policy=None, problem_resolution=None, context_format=None, entity_same_min_probability=None, publisher=None, voyage_options=None, run_id=None, database_url=None):
+                 name_mode='external', model=None, lease_seconds=1800, namer=None, name_base_url=None, name_model=None, read_input=True, embedding_cache_dir=None, name_concurrency=3, graph_policy=None, problem_resolution=None, context_format=None, entity_same_min_probability=None, member_review_mode=None, publisher=None, voyage_options=None, run_id=None, database_url=None):
         self.voyage_options = voyage_options or {}
         self.publisher = publisher
         self.snapshot_path = Path(snapshot_path).resolve()
@@ -227,6 +227,27 @@ class SnapshotGraph:
                 raise ValueError('Graph job policy cannot be changed')
             if self.graph_policy not in ('legacy','domain-v1'):
                 raise ValueError('Unknown graph policy')
+            saved_review_mode=self._meta('member_review_mode')
+            if saved_review_mode is not None and saved_review_mode not in ('anchor-v1','whole-group-v1'):
+                raise ValueError('Invalid saved member_review_mode')
+            phase=self._meta('phase')
+            has_reviews=bool(self.db.execute('SELECT 1 FROM member_reviews LIMIT 1').fetchone())
+            if self.graph_policy=='domain-v1':
+                if saved_review_mode is None and has_reviews and phase!='complete' and member_review_mode is None:
+                    raise ValueError('Partially reviewed job requires explicit member_review_mode=anchor-v1')
+                self.member_review_mode=(saved_review_mode or member_review_mode or
+                                         ('anchor-v1' if phase in ('grouped','complete') or
+                                          self.decision_metric!='probability' or self.context_format!='explicit-v1'
+                                          else 'whole-group-v1'))
+                if member_review_mode is not None and (member_review_mode not in ('anchor-v1','whole-group-v1') or
+                    saved_review_mode is not None and member_review_mode!=saved_review_mode or
+                    saved_review_mode is None and has_reviews and member_review_mode!='anchor-v1' or
+                    member_review_mode=='whole-group-v1' and (self.decision_metric!='probability' or self.context_format!='explicit-v1') or
+                    saved_review_mode is None and phase in ('grouped','complete') and member_review_mode!='anchor-v1'):
+                    raise ValueError('Graph job member_review_mode cannot be changed')
+            else:
+                if member_review_mode is not None:raise ValueError('Legacy graph has no member_review_mode')
+                self.member_review_mode=None
             if saved and saved != self.snapshot['snapshot_hash']:
                 raise ValueError('Graph job is bound to a different immutable snapshot')
             saved_file = self._meta('file_hash')
@@ -246,6 +267,7 @@ class SnapshotGraph:
                     self._set_meta('context_format',self.context_format)
                     self._set_meta('problem_resolution',str(self.problem_resolution))
                     self._set_meta('entity_same_min_probability',str(self.entity_same_min_probability))
+                    if self.member_review_mode:self._set_meta('member_review_mode',self.member_review_mode)
             elif self._meta('snapshot_stat') != stamp:
                 # The full file was read above and both canonical and byte digests matched.
                 # A restored copy can have a new path/mtime without changing the input.
@@ -668,9 +690,10 @@ class SnapshotGraph:
                 a,b=root(row['left_id']),root(row['right_id']);parent[b]=a
             conflicts=[dict(r) for r in self.db.execute("SELECT pair_id,kind,left_id,right_id FROM candidates WHERE decision='different'")
                        if root(r['left_id'])==root(r['right_id'])]
-            if conflicts:
-                with self.db.transaction():self._set_meta('identity_conflicts',json.dumps(conflicts,sort_keys=True))
-                raise ValueError('Explicit different judgment conflicts with a same identity chain; user decision required: '+json.dumps(conflicts,sort_keys=True))
+            with self.db.transaction():
+                self._set_meta('identity_conflicts',json.dumps(conflicts,sort_keys=True))
+                self._set_meta('identity_conflict_policy','member_review_v1')
+                self._set_meta('member_review_mode',self.member_review_mode)
             components={}
             for mid in sorted(parent):components.setdefault(root(mid),[]).append(mid)
             proposal=json.loads(self._meta('problem_proposal'))
@@ -690,20 +713,30 @@ class SnapshotGraph:
                     self.db.execute('''INSERT INTO groups(group_id,kind,members_json,name,description,review)
                                        VALUES(%s,%s,%s,%s,%s,'unreviewed') ON CONFLICT DO NOTHING''',
                                     (group['group_id'],group['kind'],json.dumps(group['members']),group['name'],group['description']))
-            inputs=[]
+            inputs=[];group_context={}
             for g in groups:
                 if g['kind']=='ResearchProblem':continue
-                for mid in g['members']:
+                if self.member_review_mode=='whole-group-v1':
+                    group_context[g['group_id']]=[{'mention_id':mid,'name':members[mid]['name'],
+                        'description':members[mid]['description'],'source':json.loads(members[mid]['source_json'])}
+                        for mid in g['members']]
+                for offset,mid in enumerate(g['members']):
                     if self.db.execute('SELECT 1 FROM member_reviews WHERE group_id=%s AND mention_id=%s',(g['group_id'],mid)).fetchone():continue
                     m=members[mid]
-                    inputs.append({'membership_id':'membership:'+digest([g['group_id'],mid])[:32],
+                    member=(group_context[g['group_id']][offset] if self.member_review_mode=='whole-group-v1' else
+                            {'mention_id':mid,'name':m['name'],'description':m['description'],
+                             'source':json.loads(m['source_json'])})
+                    item={'membership_id':'membership:'+digest([g['group_id'],mid])[:32],
                                    'group_id':g['group_id'],'kind':'ResearchArea' if g['kind']=='ResearchProblem' else g['kind'],
                                    'name':g['name'],'description':g['description'],
-                                   'member':{'mention_id':mid,'name':m['name'],'description':m['description'],
-                                             'source':json.loads(m['source_json'])}})
-            for start in range(0,len(inputs),self.batch_size):
-                batch=inputs[start:start+self.batch_size]
-                try:results=review_group_members(batch,self.client,decision_metric=self.decision_metric,context_format=self.context_format)
+                                   'member':member}
+                    inputs.append(item)
+            batches=[inputs[start:start+self.batch_size] for start in range(0,len(inputs),self.batch_size)]
+            for batch in batches:
+                if not batch:continue
+                try:results=review_group_members(batch,self.client,decision_metric=self.decision_metric,
+                    context_format=self.context_format,review_mode=self.member_review_mode,
+                    group_members=group_context if self.member_review_mode=='whole-group-v1' else None)
                 except Exception as exc:
                     self._record_failure(exc);raise
                 mapping={r['membership_id']:r for r in results}
@@ -711,7 +744,7 @@ class SnapshotGraph:
                     raise ValueError('Incomplete or duplicate member review')
                 with self.db.transaction():
                     for item in batch:
-                        result=mapping[item['membership_id']]
+                        result={**mapping[item['membership_id']],'review_mode':self.member_review_mode}
                         self._record_requests(result)
                         if result.get('excluded') != self._strict_exclusion(result):
                             raise ValueError('Member exclusion disagrees with strict policy')
@@ -1076,9 +1109,11 @@ class SnapshotGraph:
             'attempts':int(self._meta('neo4j_delivery_attempts') or 0),'delivery_wall_seconds':float(self._meta('neo4j_delivery_wall_seconds') or 0),
             **{key:float(self._meta('neo4j_'+key)) if self._meta('neo4j_'+key) else None for key in ('first_delivery_at','first_source_delivery_at','first_group_delivery_at','latest_delivery_at')}},'phase':self._meta('phase'),'graph_policy':self.graph_policy,'decision_metric':self.decision_metric,'context_format':self.context_format,
                 'problem_resolution':self.problem_resolution,'entity_same_min_probability':self.entity_same_min_probability,
+                'member_review_mode':self._meta('member_review_mode') or self.member_review_mode,
                 'snapshot_hash':self._meta('snapshot_hash'),
                 'research_areas':area_count,'retained_memberships':memberships.get(0,0),
                 'excluded_memberships':memberships.get(1,0),'identity_conflicts':json.loads(self._meta('identity_conflicts') or '[]'),
+                'identity_conflict_policy':self._meta('identity_conflict_policy'),
                 'candidate_pairs':counts,'groups':groups,'name_tasks':tasks,'mentions':mention_counts,
                 'stage_seconds':{r['name']:r['seconds'] for r in self.db.execute("SELECT * FROM stage WHERE name NOT LIKE 'process_cpu:%'")},
                 'stage_process_cpu_seconds':{r['name'][12:]:r['seconds'] for r in self.db.execute("SELECT * FROM stage WHERE name LIKE 'process_cpu:%'")},

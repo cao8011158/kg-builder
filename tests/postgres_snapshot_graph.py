@@ -345,6 +345,24 @@ if __name__=='__main__':unittest.main()
 
 
 class DomainGraphTests(GraphPostgresCase):
+    def test_unmarked_partial_member_review_requires_explicit_legacy_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'snapshot.json';fixture(source)
+            job=SnapshotGraph(source,root/'job',graph_policy='domain-v1')
+            with job.db.transaction():
+                job.db.execute("DELETE FROM meta WHERE key='member_review_mode'")
+                job.db.execute("INSERT INTO member_reviews VALUES('old-group','old-mention',0,'{}')")
+                job._set_meta('phase','judged')
+            job.close()
+            with self.assertRaisesRegex(ValueError,'Partially reviewed job'):
+                SnapshotGraph(source,root/'job',graph_policy='domain-v1')
+            with self.assertRaisesRegex(ValueError,'member_review_mode cannot be changed'):
+                SnapshotGraph(source,root/'job',graph_policy='domain-v1',member_review_mode='whole-group-v1')
+            job=SnapshotGraph(source,root/'job',graph_policy='domain-v1',member_review_mode='anchor-v1')
+            self.assertEqual(job.member_review_mode,'anchor-v1')
+            self.assertIsNone(job._meta('member_review_mode'))
+            job.close()
+
     def test_cli_resolution_status_and_mismatch(self):
         from contextlib import redirect_stdout
         from io import StringIO
@@ -481,7 +499,7 @@ class DomainGraphTests(GraphPostgresCase):
             job.close()
             job=SnapshotGraph(source,root/'old');self.assertEqual(job.graph_policy,'legacy');job.close()
 
-    def test_conflicting_different_same_chain_requires_decision(self):
+    def test_conflicting_different_same_chain_continues_to_member_review(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);source=root/'snapshot.json';fixture(source,n=3)
             def conflicting(items,client,**kwargs):
@@ -489,12 +507,119 @@ class DomainGraphTests(GraphPostgresCase):
                 different=method[0]['pair_id']
                 return [{'pair_id':p['pair_id'],'decision':'different' if p['pair_id']==different else 'same','raw':{}}
                         for p in items]
-            with patch('kg_builder.decision_api.judge_pairs',conflicting):
+            reviewed=[]
+            def members(items,client,**kwargs):
+                reviewed.extend(items)
+                return [member_result(item) for item in items]
+            with patch('kg_builder.decision_api.judge_pairs',conflicting),patch('kg_builder.decision_api.review_group_members',members):
                 job=SnapshotGraph(source,root/'job',graph_policy='domain-v1',client=object(),k=2,model=FakeEmbedding())
-                with self.assertRaisesRegex(ValueError,'user decision required'):job.run()
-                self.assertEqual(job.status()['phase'],'judged')
-                self.assertTrue(job.status()['identity_conflicts'])
+                state=job.run()
+                self.assertEqual(state['phase'],'grouped')
+                self.assertEqual(len(state['identity_conflicts']),1)
+                self.assertEqual(state['identity_conflict_policy'],'member_review_v1')
+                self.assertEqual(len([item for item in reviewed if item['kind']=='Method']),3)
+                self.assertEqual(job.db.execute("SELECT count(*) FROM candidates WHERE decision='different'").fetchone()['count'],1)
+                self.assertEqual(job.db.execute("SELECT count(*) FROM member_reviews mr JOIN groups g ON g.group_id=mr.group_id WHERE g.kind='Method'").fetchone()['count'],3)
+                while task_batch:=job.claim('worker'):
+                    job.submit([{'task_id':task['task_id'],'lease_token':task['lease_token'],
+                                 'input_hash':task['input_hash'],'result':{'group_id':task['group_id'],
+                                 'name':'Memory research area','description':'Recall over time'}} for task in task_batch])
+                self.assertEqual(job.run()['phase'],'complete')
+                before=[dict(row) for row in job.db.execute('SELECT pair_id,decision,audit FROM candidates ORDER BY pair_id')]
+                with patch('kg_builder.decision_api.judge_pairs',side_effect=AssertionError('pair replay')), \
+                     patch('kg_builder.decision_api.review_group_members',side_effect=AssertionError('member replay')):
+                    self.assertEqual(job.run()['phase'],'complete')
+                self.assertEqual(before,[dict(row) for row in job.db.execute('SELECT pair_id,decision,audit FROM candidates ORDER BY pair_id')])
                 job.close()
+                from kg_builder.graph_validation import validate_graph
+                audit=validate_graph(source,root/'job',database_url=self.database_url)
+                self.assertTrue(audit['structural']['passed'],audit['structural'])
+
+    def test_sparse_five_member_chain_reviews_without_all_pairs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'snapshot.json';fixture(source,n=5)
+            job=SnapshotGraph(source,root/'job',graph_policy='domain-v1',client=object(),k=2,model=FakeEmbedding())
+            job._prepare_store();job._candidates()
+            store=job._semantic_store()
+            try:
+                mids=sorted(r['mention_id'] for r in store.db.execute("SELECT mention_id FROM mentions WHERE kind='Method'"))
+            finally:store.close()
+            edges=[(0,2,'same'),(2,3,'same'),(3,1,'same'),(1,4,'same'),(0,1,'different')]
+            with job.db.transaction():
+                job.db.execute('DELETE FROM candidates')
+                for n,(a,b,decision) in enumerate(edges):
+                    job.db.execute('INSERT INTO candidates(pair_id,kind,left_id,right_id,similarity,decision,audit) VALUES(%s,%s,%s,%s,%s,%s,%s)',
+                                   (f'synthetic:{n}','Method',mids[a],mids[b],0.8,decision,json.dumps({'original':decision})))
+                job._set_meta('phase','judged')
+                job.db.execute("DELETE FROM meta WHERE key='member_review_mode'")
+            job.close()
+            job=SnapshotGraph(source,root/'job',graph_policy='domain-v1',client=object(),k=2,model=FakeEmbedding())
+            self.assertEqual(job.member_review_mode,'whole-group-v1')
+            reviewed=[]
+            def members(items,client,**kwargs):
+                result=[]
+                for item in items:
+                    if item['kind']=='Method':
+                        reviewed.append(item)
+                        mid=item['member']['mention_id']
+                        choice,score=({mids[0]:('not_belongs',.9),mids[1]:('insufficient',.9),
+                                       mids[2]:('not_belongs',.7)}.get(mid,('belongs',.2)))
+                    else:choice,score='belongs',.2
+                    result.append(member_result(item,choice,score))
+                return result
+            with patch('kg_builder.decision_api.judge_pairs',side_effect=AssertionError('pair replay')), \
+                 patch('kg_builder.decision_api.review_group_members',members):
+                state=job.run()
+            self.assertEqual(state['phase'],'grouped')
+            self.assertEqual(state['candidate_pairs'],{'same':4,'different':1})
+            self.assertEqual(len(state['identity_conflicts']),1)
+            self.assertEqual(len(reviewed),5)
+            self.assertEqual(state['excluded_memberships'],1)
+            self.assertEqual(job.db.execute("SELECT count(*) FROM groups WHERE kind='Method'").fetchone()['count'],1)
+            self.assertEqual([json.loads(r['audit'])['original'] for r in job.db.execute('SELECT audit FROM candidates ORDER BY pair_id')],
+                             ['same','same','same','same','different'])
+            while task_batch:=job.claim('worker'):
+                job.submit([{'task_id':task['task_id'],'lease_token':task['lease_token'],
+                             'input_hash':task['input_hash'],'result':{'group_id':task['group_id'],
+                             'name':'Memory research area','description':'Recall over time'}} for task in task_batch])
+            with patch('kg_builder.decision_api.judge_pairs',side_effect=AssertionError('pair replay')), \
+                 patch('kg_builder.decision_api.review_group_members',members):
+                self.assertEqual(job.run()['phase'],'complete')
+            source_store=job._semantic_store()
+            try:
+                rows={r['mention_id']:r for r in source_store.db.execute("SELECT mention_id,name,entity_id FROM mentions WHERE kind='Method'")}
+                retained=rows[mids[1]]['entity_id']
+                self.assertEqual({rows[mid]['entity_id'] for mid in mids[1:]},{retained})
+                self.assertNotEqual(rows[mids[0]]['entity_id'],retained)
+                self.assertEqual(source_store.db.execute('SELECT name FROM entities WHERE entity_id=%s',(retained,)).fetchone()['name'],rows[mids[1]]['name'])
+            finally:source_store.close()
+            job.close()
+
+    def test_native_whole_group_adapter_batches_multiple_groups(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'snapshot.json';fixture(source,n=3)
+            class Client:
+                max_concurrency=1
+                def __init__(self):self.calls=[]
+                def decide(self,state,questions):
+                    self.calls.append((state,questions))
+                    return {'model':'jev-1.14.0','answers':{qid:{'type':'choice','choice':'belongs',
+                        'probabilities':{'belongs':.9,'not_belongs':.05,'insufficient':.05},'confidence':.1}
+                        for qid in questions},'attempts':1,'request_duration_s':.01}
+            client=Client()
+            with patch('kg_builder.decision_api.judge_pairs',pairs):
+                job=SnapshotGraph(source,root/'job',graph_policy='domain-v1',client=client,k=2,model=FakeEmbedding())
+                state=job.run()
+            self.assertEqual(state['phase'],'grouped')
+            self.assertEqual(state['member_review_mode'],'whole-group-v1')
+            self.assertEqual(len(client.calls),1)
+            packet,questions=client.calls[0]
+            self.assertEqual(len(questions),6)
+            self.assertEqual(sorted(len(group['members']) for group in packet['candidate_groups']),[1,1,1,3])
+            self.assertTrue(all('state.candidate_groups[' in q['instructions'] for q in questions.values()))
+            self.assertTrue(all(json.loads(r['audit'])['review_mode']=='whole-group-v1'
+                                for r in job.db.execute('SELECT audit FROM member_reviews')))
+            job.close()
 
     def test_api_area_naming_and_terminal_replay_without_api(self):
         with tempfile.TemporaryDirectory() as tmp:

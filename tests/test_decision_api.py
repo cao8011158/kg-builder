@@ -330,6 +330,67 @@ class ProbabilityProjectionTests(unittest.TestCase):
                     answer['probabilities'] = self.distributions[suffix]
             return response
 
+    def test_whole_group_member_questions_share_complete_group_without_anchor(self):
+        members=[{'mention_id':f'm{n}','name':f'Variant {n}',
+                  'description':f'Original member {n}','source':{'version_or_subset':'Lite' if n==0 else 'Verified'}}
+                 for n in range(12)]
+        items=[{'membership_id':f'g:m{n}','group_id':'g','kind':'Benchmark',
+                'name':'Wrong first-member anchor','description':'Wrong anchor definition','member':member}
+               for n,member in enumerate(members)]
+        client=self.PacketClient()
+        result=review_group_members(items,client,review_mode='whole-group-v1',group_members={'g':members})
+        self.assertEqual(len(client.calls),1)
+        state,questions=client.calls[0]
+        self.assertEqual((len(state['candidate_groups']),len(state['candidate_groups'][0]['members']),len(questions)),(1,12,12))
+        self.assertNotIn('Wrong first-member anchor',json.dumps((state,questions)))
+        self.assertNotIn('m0',json.dumps((state,questions)))
+        self.assertEqual(state['candidate_groups'][0]['members'][0]['version_or_subset'],'Lite')
+        for n in range(12):
+            prompt=questions[f'i{n}_membership']['instructions']
+            self.assertIn('state.candidate_groups[0].members',prompt)
+            self.assertIn(f'"name": "Variant {n}"',prompt)
+            self.assertNotIn('state.entities[',prompt)
+        self.assertTrue(all(row['review_mode']=='whole-group-v1' for row in result))
+
+    def test_whole_group_split_keeps_every_member_and_isolates_groups(self):
+        members=[{'mention_id':f'm{n}','name':f'Member {n}','description':f'Claim {n}',
+                  'source':{'version_or_subset':'v1'}} for n in range(25)]
+        other={'mention_id':'other','name':'Other','description':'Other claim','source':{}}
+        items=[{'membership_id':f'g:{m["mention_id"]}','group_id':'g','kind':'Method',
+                'name':'ignored','description':'ignored','member':m} for m in members]
+        items.append({'membership_id':'h:other','group_id':'h','kind':'Benchmark',
+                      'name':'ignored','description':'ignored','member':other})
+        client=self.PacketClient()
+        review_group_members(items,client,review_mode='whole-group-v1',group_members={'g':members,'h':[other]})
+        self.assertEqual([len(q) for _,q in client.calls],[24,2])
+        self.assertEqual(len(client.calls[0][0]['candidate_groups'][0]['members']),25)
+        self.assertEqual(len(client.calls[1][0]['candidate_groups'][0]['members']),25)
+        self.assertEqual(len(client.calls[1][0]['candidate_groups'][1]['members']),1)
+        self.assertIn('state.candidate_groups[1].members',client.calls[1][1]['i1_membership']['instructions'])
+        self.assertNotIn('Other',json.dumps(client.calls[0]))
+
+    def test_whole_group_budget_fails_without_sending_subset(self):
+        member={'mention_id':'m','name':'A','description':'X'*41000,'source':{}}
+        item={'membership_id':'g:m','group_id':'g','kind':'Method',
+              'name':'ignored','description':'ignored','member':member}
+        client=self.PacketClient()
+        with self.assertRaisesRegex(ValueError,'members=1 state_chars='):
+            review_group_members([item],client,review_mode='whole-group-v1',group_members={'g':[member]})
+        self.assertEqual(client.calls,[])
+
+    def test_whole_group_preserves_path_shaped_target_evidence(self):
+        literal='The source literally says state.candidate_groups[GROUP].members and TARGET_MEMBER.'
+        member={'mention_id':'m','name':'A','description':literal,'source':{}}
+        item={'membership_id':'g:m','group_id':'g','kind':'Method',
+              'name':'ignored','description':'ignored','member':member}
+        client=self.PacketClient()
+        review_group_members([item],client,review_mode='whole-group-v1',group_members={'g':[member]})
+        state,questions=client.calls[0]
+        prompt=questions['i0_membership']['instructions']
+        self.assertIn('state.candidate_groups[0].members? Target member:',prompt)
+        self.assertIn(literal,prompt)
+        self.assertEqual(state['candidate_groups'][0]['members'][0]['description'],literal)
+
     def test_explicit_questions_bind_semantic_objects_with_shared_state(self):
         a={'mention_id':'private-a','name':'Alpha','description':'first','source':{'version_or_subset':'v1'}}
         pairs=[{'pair_id':str(n),'kind':'Benchmark','left':a,
