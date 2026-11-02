@@ -132,6 +132,12 @@ CREATE TABLE IF NOT EXISTS full_deferred (
  PRIMARY KEY(source,source_id));
 '''
 
+# Readiness belongs to this initializer, independently of workflow business rows.
+# A changed schema requires an explicit migration decision, not silent DDL replay.
+SCHEMA_REVISION = 'preparation-postgres/1'
+SCHEMA_FINGERPRINT = hashlib.sha256(
+    (SCHEMA_REVISION+'\0'+SOURCE_DDL+'\0'+WORKFLOW_DDL).encode('utf-8')).hexdigest()
+
 
 def database_url(explicit: str | None = None) -> str:
     value = explicit or os.environ.get('KG_DATABASE_URL') or os.environ.get('DATABASE_URL')
@@ -197,12 +203,15 @@ class PreparationStore:
 
     def _initialize(self):
         with self.pool.connection() as conn, conn.transaction():
+            if self._schema_ready(conn):return
             # Initializers of the same logical run must not race on CREATE TABLE
             # and CREATE INDEX. The lock key is stable across processes.
             lock_key = int.from_bytes(hashlib.sha256(
                 ('schema:' + self.workflow_schema).encode()).digest()[:8],
                 'big', signed=True)
             conn.execute('SELECT pg_advisory_xact_lock(%s)', (lock_key,))
+            # A concurrent first initializer may have committed while we waited.
+            if self._schema_ready(conn):return
             for schema, ddl in ((self.source_schema,SOURCE_DDL),
                                 (self.workflow_schema,WORKFLOW_DDL)):
                 conn.execute(sql.SQL('CREATE SCHEMA IF NOT EXISTS {}').format(sql.Identifier(schema)))
@@ -214,3 +223,27 @@ class PreparationStore:
                 sql.Identifier(self.workflow_schema))).fetchone()
             if row and row['run_id'] != self.run_id:
                 raise ValueError('Logical run identity differs from saved run')
+            conn.execute(sql.SQL('''CREATE TABLE {}.schema_bootstrap (
+                id INTEGER PRIMARY KEY CHECK(id=1), run_id TEXT NOT NULL,
+                revision TEXT NOT NULL, ddl_fingerprint TEXT NOT NULL)''').format(
+                sql.Identifier(self.workflow_schema)))
+            # DDL and readiness commit together, including the pre-marker path.
+            conn.execute(sql.SQL('INSERT INTO {}.schema_bootstrap VALUES(1,%s,%s,%s)').format(
+                sql.Identifier(self.workflow_schema)),
+                (self.run_id,SCHEMA_REVISION,SCHEMA_FINGERPRINT))
+
+    def _schema_ready(self, conn):
+        marker=conn.execute('SELECT to_regclass(%s) AS name',
+                           (self.workflow_schema+'.schema_bootstrap',)).fetchone()
+        if marker['name'] is None:return False
+        row=conn.execute(sql.SQL('''SELECT b.run_id,b.revision,b.ddl_fingerprint,
+            r.run_id AS workflow_run_id FROM {}.schema_bootstrap b
+            LEFT JOIN {}.run r ON r.id=1 WHERE b.id=1''').format(
+                sql.Identifier(self.workflow_schema),sql.Identifier(self.workflow_schema))).fetchone()
+        if row is None:
+            raise ValueError('Missing PostgreSQL schema readiness marker')
+        if row['run_id']!=self.run_id or row['workflow_run_id'] not in (None,self.run_id):
+            raise ValueError('Logical run identity differs from saved run')
+        if row['revision']!=SCHEMA_REVISION or row['ddl_fingerprint']!=SCHEMA_FINGERPRINT:
+            raise ValueError('PostgreSQL schema version differs; explicit migration required')
+        return True

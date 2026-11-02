@@ -2,12 +2,15 @@
 from __future__ import annotations
 import asyncio
 from datetime import date
+from email.utils import parsedate_to_datetime
 import hashlib
 import json
+import logging
 from pathlib import Path
 import threading
 import time
 from urllib.parse import urlencode
+from urllib.error import HTTPError, URLError
 from xml.etree import ElementTree as ET
 
 from .collectors import fetch_bytes, normalize_openalex, normalize_arxiv_entry
@@ -17,6 +20,31 @@ import secrets
 
 PLAN = Path(__file__).resolve().parents[2] / 'config/full_preparation_plan.json'
 OA_SELECT = 'id,doi,title,publication_year,publication_date,authorships,abstract_inverted_index,ids,primary_location,updated_date'
+SOURCE_ATTEMPTS = 5
+LOG = logging.getLogger(__name__)
+
+
+def _transient_source_error(exc):
+    if isinstance(exc, HTTPError):
+        return exc.code in (429,500,502,503,504)
+    return isinstance(exc, (URLError,TimeoutError,ConnectionError))
+
+
+def _source_retry_delay(exc, attempt):
+    value=exc.headers.get('Retry-After') if isinstance(exc,HTTPError) and exc.headers else None
+    if value:
+        try:
+            if value.strip().isdigit():return float(value)
+            return max(0,parsedate_to_datetime(value).timestamp()-time.time())
+        except (ValueError,TypeError,OverflowError):pass
+    return min(30,3.05*2**(attempt-1))
+
+
+class _RetrySourcePage(Exception):
+    def __init__(self, source, cause, delay):
+        self.source=source
+        self.cause=cause
+        self.delay=delay
 
 
 def fetch_page(source, plan, window, position, *, fetch=fetch_bytes):
@@ -27,11 +55,11 @@ def fetch_page(source, plan, window, position, *, fetch=fetch_bytes):
                 'per-page':plan['page_size'], 'cursor':position, 'select':OA_SELECT}
         import os
         if os.getenv('OPENALEX_API_KEY'): args['api_key']=os.environ['OPENALEX_API_KEY']
-        return fetch('https://api.openalex.org/works?'+urlencode(args))
+        return fetch('https://api.openalex.org/works?'+urlencode(args),max_retries=1)
     args={'search_query':plan['arxiv_query'],'start':position,'max_results':plan['page_size'],
           'sortBy':'submittedDate','sortOrder':'descending'}
     # The stream owns the persistent three-second gate. Internal HTTP retries
-    # would bypass it, so a failed request is retried on run resume.
+    # would bypass it; retries reacquire the stream lease and this gate.
     return fetch('https://export.arxiv.org/api/query?'+urlencode(args),
                  headers={'Accept':'application/atom+xml'},max_retries=1)
 
@@ -131,8 +159,9 @@ class FullPreparationWorkflow(PreparationWorkflow):
         finally:
             if owns_connection:self._release(db)
 
-    def _consume(self, stream_id):
+    def _consume(self, stream_id, *, attempt=SOURCE_ATTEMPTS):
         db=self._db();token=secrets.token_urlsafe(24)
+        request_failure=False
         try:
             with db.transaction():
                 stream=db.execute('SELECT * FROM full_streams WHERE stream_id=%s FOR UPDATE SKIP LOCKED',(stream_id,)).fetchone()
@@ -153,8 +182,13 @@ class FullPreparationWorkflow(PreparationWorkflow):
                     db.execute('UPDATE full_streams SET next_request_at=%s WHERE stream_id=%s',(request_at+3.05,stream_id))
                 else:request_at=0
             if page is None:
-                if request_at:time.sleep(max(0,request_at-time.time()))
-                raw=self.fetcher(source,self.plan,windows[wi],position)
+                if request_at and self._stop_collection.wait(max(0,request_at-time.time())):
+                    raise InterruptedError('Full collection stopped')
+                if self._stop_collection.is_set():raise InterruptedError('Full collection stopped')
+                try:raw=self.fetcher(source,self.plan,windows[wi],position)
+                except Exception:
+                    request_failure=True
+                    raise
                 with db.transaction():
                     current=db.execute('SELECT lease_token,lease_until FROM full_streams WHERE stream_id=%s FOR UPDATE',(stream_id,)).fetchone()
                     if current['lease_token']!=token or current['lease_until']<time.time():raise ValueError('Stale stream lease')
@@ -195,22 +229,36 @@ class FullPreparationWorkflow(PreparationWorkflow):
                      page['admitted'],stream_id,token))
             return state!='done'
         except Exception as exc:
+            retry=request_failure and _transient_source_error(exc) and attempt<SOURCE_ATTEMPTS
             with db.transaction():
-                db.execute('''UPDATE full_streams SET state='failed',lease_token=NULL,lease_until=NULL,error=%s
+                updated=db.execute('''UPDATE full_streams SET state=%s,lease_token=NULL,lease_until=NULL,error=%s
                     WHERE stream_id=%s AND lease_token=%s''',
-                    (type(exc).__name__+(' HTTP '+str(exc.code) if isinstance(getattr(exc,'code',None),int) else ''),stream_id,token))
+                    ('open' if retry else 'failed',type(exc).__name__+(' HTTP '+str(exc.code) if isinstance(getattr(exc,'code',None),int) else ''),stream_id,token))
+            if retry and updated.rowcount==1:
+                raise _RetrySourcePage(source,exc,_source_retry_delay(exc,attempt)) from exc
             raise
         finally:self._release(db)
 
     def _stream(self, stream_id):
+        attempt=1
         while not self._stop_collection.is_set():
-            if self._consume(stream_id):continue
+            try:more=self._consume(stream_id,attempt=attempt)
+            except _RetrySourcePage as retry:
+                LOG.warning('Source retry source=%s attempt=%s/%s delay=%.3fs type=%s',
+                            retry.source,attempt+1,SOURCE_ATTEMPTS,retry.delay,type(retry.cause).__name__)
+                if self._stop_collection.wait(retry.delay):raise InterruptedError('Full collection stopped')
+                attempt+=1
+                continue
+            if more:
+                attempt=1
+                continue
             db=self._db()
             try:state=db.execute('SELECT state FROM full_streams WHERE stream_id=%s',(stream_id,)).fetchone()['state']
             finally:self._release(db)
             if state=='done':return
             if state=='failed':raise ValueError('Full stream failed')
-            time.sleep(.5)
+            self._stop_collection.wait(.5)
+        raise InterruptedError('Full collection stopped')
 
     def _finish_empty(self):
         db=self._db()
@@ -238,12 +286,14 @@ class FullPreparationWorkflow(PreparationWorkflow):
         # One arXiv request lane and four independent OpenAlex cursor lanes.
         try:
             self._stop_collection.clear()
+            # Explicit run resume retains its existing failed-stream recovery.
             for stream_id in ('openalex-0','openalex-1','openalex-2','openalex-3','arxiv-0'):
                 db=self._db()
                 with db.transaction():db.execute("UPDATE full_streams SET state='open',error=NULL WHERE stream_id=%s AND state='failed'",(stream_id,))
                 self._release(db)
             await asyncio.gather(*(asyncio.to_thread(self._stream,s) for s in
                 ('openalex-0','openalex-1','openalex-2','openalex-3','arxiv-0')))
+            if self._stop_collection.is_set():raise InterruptedError('Full collection stopped')
             await asyncio.to_thread(self._finish_empty)
         except asyncio.CancelledError:
             self._stop_collection.set()
@@ -255,8 +305,12 @@ class FullPreparationWorkflow(PreparationWorkflow):
             self._release(db)
             raise
         db=self._db()
-        with db.transaction():db.execute("UPDATE run SET collection_state='sealed',error=NULL WHERE id=1")
-        self._release(db)
+        try:
+            with db.transaction():
+                if self._stop_collection.is_set() or db.execute("SELECT 1 FROM full_streams WHERE state<>'done' LIMIT 1").fetchone():
+                    raise InterruptedError('Full collection unfinished')
+                db.execute("UPDATE run SET collection_state='sealed',error=NULL WHERE id=1")
+        finally:self._release(db)
 
     def status(self):
         result=super().status()
