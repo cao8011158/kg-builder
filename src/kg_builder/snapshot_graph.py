@@ -27,6 +27,14 @@ def canonical_hash(value):
                                      separators=(',', ':'), allow_nan=False).encode()).hexdigest()
 
 
+def validate_name_result(value, group_id):
+    """Validate the external naming shape without opening API clients."""
+    if not isinstance(value,dict) or not isinstance(value.get('name'),str) or not value['name'].strip() or not isinstance(value.get('description'),str) or not value['description'].strip():
+        raise ValueError('Name result requires name and description')
+    if value.get('group_id',group_id)!=group_id:
+        raise ValueError('Group pin mismatch')
+
+
 def read_snapshot(path):
     raw = Path(path).read_bytes()
     snapshot = json.loads(raw)
@@ -480,9 +488,14 @@ class SnapshotGraph:
                 if self.graph_policy == 'domain-v1' and kind == 'ResearchProblem':continue
                 index = HNSWIndex(data, self._meta('model_id') or 'empty-snapshot')
                 for mid, vector in data.items():
+                    selected = 0
                     for neighbor in index.search(vector, min(len(data), self.k+1)):
                         other = neighbor['id']
                         if mid == other: continue
+                        # Equal-distance HNSW results need not contain self.
+                        # Keep the requested non-self K bound in either case.
+                        if selected >= self.k: break
+                        selected += 1
                         a,b = sorted((mid,other))
                         pairs[(kind,a,b)] = max(pairs.get((kind,a,b),-1),neighbor['similarity'])
             proposal = cluster_problem_vectors(bykind['ResearchProblem'],k=self.k,resolution=self.problem_resolution)
@@ -817,10 +830,7 @@ class SnapshotGraph:
                     raise ValueError('Conflicting name submission')
                 if row['status']!='leased' or row['expires']<=time.time() or row['token']!=item.get('lease_token'):
                     raise ValueError('Stale name lease')
-                if not isinstance(value,dict) or not isinstance(value.get('name'),str) or not value['name'].strip() or not isinstance(value.get('description'),str) or not value['description'].strip():
-                    raise ValueError('Name result requires name and description')
-                if value.get('group_id',row['group_id'])!=row['group_id']:
-                    raise ValueError('Group pin mismatch')
+                validate_name_result(value,row['group_id'])
                 mids=json.loads(self.db.execute('SELECT members_json FROM groups WHERE group_id=%s',(row['group_id'],)).fetchone()['members_json'])
                 store=self._semantic_store()
                 try:
