@@ -537,6 +537,92 @@ class DomainGraphTests(GraphPostgresCase):
 
 
 class ParallelPairTests(GraphPostgresCase):
+    def test_public_cli_status_preflight_allows_first_neo4j_run_without_api_during_status(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from scripts.build_snapshot_graph import main
+        class Publisher:
+            def __init__(self):self.events=[]
+            def publish(self,run_id,event):self.events.append((run_id,event))
+            def close(self):pass
+        publisher=Publisher()
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'snapshot.json';fixture(source)
+            base=['--snapshot',str(source),'--job-dir',str(root/'job'),'--embedding-provider','fastembed']
+            with patch('kg_builder.embeddings.create_embedding_model',return_value=FakeEmbedding()) as embedding,\
+                 patch('kg_builder.decision_api.JevClient',return_value=object()) as client,\
+                 patch('kg_builder.neo4j_store.Neo4jStore.from_env',return_value=publisher) as graph,\
+                 patch('kg_builder.decision_api.judge_pairs',pairs),\
+                 patch('kg_builder.decision_api.review_group_members',side_effect=lambda items,*args,**kwargs:[member_result(item) for item in items]):
+                with redirect_stdout(StringIO()) as output:main([*base,'status'])
+                self.assertEqual(json.loads(output.getvalue())['phase'],'new')
+                embedding.assert_not_called();client.assert_not_called();graph.assert_not_called()
+                with redirect_stdout(StringIO()) as output:main([*base,'--neo4j','run'])
+                result=json.loads(output.getvalue())
+                self.assertEqual(result['phase'],'grouped')
+                self.assertTrue(result['neo4j_run_id'])
+                self.assertEqual(result['neo4j_projection']['pending'],0)
+                self.assertGreater(result['neo4j_projection']['delivered'],0)
+                self.assertTrue(publisher.events)
+            self.assertEqual(list((root/'job').glob('*.sqlite')),[])
+
+    def test_publisher_binding_rejects_processed_or_partial_local_business_state(self):
+        class Publisher:
+            def publish(self,*args):raise AssertionError('Rejected binding must not publish')
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'snapshot.json';fixture(source)
+            for phase in ('new','imported','grouped','complete'):
+                with self.subTest(phase=phase):
+                    job=SnapshotGraph(source,root/phase)
+                    job._prepare_store()
+                    with job.db.transaction():job._set_meta('phase',phase)
+                    job.close()
+                    with self.assertRaisesRegex(ValueError,'Enable Neo4j only for a fresh graph job'):
+                        SnapshotGraph(source,root/phase,publisher=Publisher())
+            job=SnapshotGraph(source,root/'legacy',graph_policy='legacy');job.close()
+            with self.assertRaisesRegex(ValueError,'Neo4j publishing requires domain-v1'):
+                SnapshotGraph(source,root/'legacy',publisher=Publisher())
+
+    def test_first_publisher_selection_rejects_active_local_driver_uncommitted_import(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from kg_builder import snapshot_graph
+        inserted=threading.Event();release=threading.Event();local=threading.local()
+        original_store=snapshot_graph.GraphStore
+        class Connection:
+            def __init__(self,db):self.db=db
+            def execute(self,query,*args):
+                result=self.db.execute(query,*args)
+                if getattr(local,'driver',False) and isinstance(query,str) and query.startswith('INSERT INTO papers'):
+                    inserted.set()
+                    if not release.wait(10):raise AssertionError('publisher opener did not progress')
+                return result
+            def __getattr__(self,name):return getattr(self.db,name)
+        def store(*args,**kwargs):
+            value=original_store(*args,**kwargs);value.db=Connection(value.db);return value
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'snapshot.json';fixture(source,n=1)
+            def run_local():
+                local.driver=True
+                graph=SnapshotGraph(source,root/'job',client=object())
+                try:
+                    with self.assertRaisesRegex(RuntimeError,'stop after import'):graph.run()
+                finally:graph.close()
+            with patch.object(snapshot_graph,'GraphStore',store),patch.object(SnapshotGraph,'_candidates',side_effect=RuntimeError('stop after import')):
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    future=pool.submit(run_local)
+                    try:
+                        self.assertTrue(inserted.wait(10))
+                        with self.assertRaisesRegex(ValueError,'graph driver is active'):
+                            SnapshotGraph(source,root/'job',publisher=object())
+                    finally:release.set()
+                    future.result(15)
+            graph=SnapshotGraph(source,root/'job',read_input=False)
+            self.assertEqual(graph._meta('phase'),'imported')
+            self.assertIsNone(graph._meta('neo4j_run_id'))
+            self.assertEqual(graph.db.execute('SELECT count(*) FROM sources').fetchone()['count'],1)
+            self.assertEqual(graph.db.execute('SELECT count(*) FROM graph_outbox').fetchone()['count'],0)
+            graph.close()
+
     def test_concurrent_first_open_binds_snapshot_and_configuration_once(self):
         from concurrent.futures import ThreadPoolExecutor
         from kg_builder import snapshot_graph

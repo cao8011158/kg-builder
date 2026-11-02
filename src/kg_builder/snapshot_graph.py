@@ -254,7 +254,21 @@ class SnapshotGraph:
             if self.publisher is not None:
                 if self.graph_policy != 'domain-v1':raise ValueError('Neo4j publishing requires domain-v1')
                 if not self._meta('neo4j_run_id'):
-                    if saved:raise ValueError('Enable Neo4j only for a fresh graph job')
+                    if saved:
+                        # A public status/claim preflight may have bound only the
+                        # snapshot metadata. It must not consume the first-run
+                        # opportunity to select Neo4j publishing. Imported local
+                        # business state remains ineligible for backend conversion.
+                        driver_lock=int.from_bytes(hashlib.sha256(('graph-driver:'+self.run_id).encode()).digest()[:8],'big',signed=True)
+                        if not self.db.execute('SELECT pg_try_advisory_xact_lock(%s) AS locked',(driver_lock,)).fetchone()['locked']:
+                            raise ValueError('Cannot enable Neo4j while a graph driver is active')
+                        business_tables=('papers','paper_versions','extraction_records','sources','mentions',
+                            'contributions','entities','reviews','research_areas','research_area_members',
+                            'embedding_cache','candidates','groups','tasks','member_reviews','graph_outbox')
+                        has_business_state=self.db.execute(' UNION ALL '.join(
+                            'SELECT 1 FROM '+table for table in business_tables)+' LIMIT 1').fetchone()
+                        if self._meta('phase')!='new' or has_business_state:
+                            raise ValueError('Enable Neo4j only for a fresh graph job')
                     with self.db.transaction():self._set_meta('neo4j_run_id','graph:'+uuid.uuid4().hex)
             elif self._meta('neo4j_run_id') and read_input:
                 raise ValueError('This graph job requires its Neo4j publisher')
