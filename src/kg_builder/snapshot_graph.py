@@ -214,6 +214,13 @@ class SnapshotGraph:
             with self.db:self._set_meta('snapshot_stat',stamp)
         if saved and (int(self._meta('k')) != k or self._meta('name_mode') != name_mode):
             raise ValueError('Graph job configuration changed')
+        frozen_model = self._meta('model_id')
+        if frozen_model is None and 'vectors' in self.snapshot:
+            ids = {row.get('model_id') for row in self.snapshot['vectors']}
+            frozen_model = next(iter(ids)) if len(ids) == 1 else None
+        if self.model is not None and frozen_model and self.model.model_id != frozen_model:
+            self.db.close()
+            raise ValueError('Embedding model differs from snapshot')
 
     def close(self):
         self.db.close()
@@ -298,6 +305,8 @@ class SnapshotGraph:
             known.update({r['paper_id']+'::'+r['item_key']: ('Contribution',r['description']) for r in store.db.execute('SELECT s.paper_id,c.item_key,c.description FROM contributions c JOIN sources s ON s.extraction_id=c.extraction_id')})
             seen = set()
             model_ids = set()
+            dimension = None
+            model_dimensions = {}
             with store.db:
                 for row in self.snapshot['vectors']:
                     key = row['item_key']
@@ -309,7 +318,15 @@ class SnapshotGraph:
                         raise ValueError('Snapshot vector text/model mismatch')
                     vector = row['vector']
                     from .vector_index import _unit_vector
-                    _unit_vector(vector)
+                    _unit_vector(vector, dimension)
+                    dimension = len(vector)
+                    if row['model_id'].startswith('voyageai:'):
+                        from .embeddings import embedding_model_from_id
+                        if row['model_id'] not in model_dimensions:
+                            model_dimensions[row['model_id']] = embedding_model_from_id(row['model_id']).dimension
+                        expected_dimension = model_dimensions[row['model_id']]
+                        if dimension != expected_dimension:
+                            raise ValueError('Snapshot vector dimension differs from model identity')
                     model_ids.add(row['model_id'])
                     store.db.execute('INSERT OR IGNORE INTO embedding_cache VALUES(?,?,?)',
                                      (row['model_id'], digest(expected), json.dumps(vector)))
@@ -770,10 +787,12 @@ class SnapshotGraph:
         finally:store.close()
 
     def _compatible_model(self):
-        if self.model is not None:return self.model
         model_id=self._meta('model_id')
-        from .embeddings import EmbeddingModel
-        model=EmbeddingModel(cache_dir=self.embedding_cache_dir)
+        if self.model is not None:
+            model = self.model
+        else:
+            from .embeddings import embedding_model_from_id
+            model=embedding_model_from_id(model_id,cache_dir=self.embedding_cache_dir)
         if model.model_id!=model_id:
             raise ValueError('Provide an embedding model matching the frozen snapshot for retrieval indexes')
         return model

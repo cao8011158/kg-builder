@@ -32,6 +32,9 @@ def main(argv=None):
     submit=sub.add_parser('submit');submit.add_argument('--input',type=Path,required=True)
     sub.add_parser('status')
     snap=sub.add_parser('snapshot');snap.add_argument('--output',type=Path,required=True);snap.add_argument('--cache-dir',type=Path)
+    snap.add_argument('--embedding-provider',choices=['fastembed','voyage'],default='fastembed')
+    snap.add_argument('--embedding-model')
+    snap.add_argument('--embedding-dimension',type=int,default=1024)
     a=p.parse_args(argv)
     kw={k:getattr(a,k) for k in ('target','llm_mode','jev_model','batch_size','per_query','since','until','repair_limit','lease_seconds','review_policy','item_max_reviews','jev_concurrency','generation_concurrency','scope_workers','review_workers')} if a.command=='run' else {}
     if a.command=='run':kw['min_confidence']=a.min_probability
@@ -44,17 +47,20 @@ def main(argv=None):
     if a.command=='run' and a.llm_mode=='api' and not os.getenv('LLM_API_KEY'):
         p.error('LLM_API_KEY is required for API extraction')
     wf=PreparationWorkflow(a.run_dir,run_id=a.run_id,**kw)
-    if a.command=='run': result=asyncio.run(wf.run())
-    elif a.command=='claim':
-        result=wf.claim(a.kind,a.limit,a.worker)
-        a.output.parent.mkdir(parents=True,exist_ok=True)
-        a.output.write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
-    elif a.command=='submit':result=wf.submit(json.loads(a.input.read_text(encoding='utf-8')))
-    elif a.command=='snapshot':
-        if a.cache_dir:
-            from kg_builder.embeddings import EmbeddingModel
-            wf.embedding=EmbeddingModel(cache_dir=a.cache_dir)
-        result=wf.snapshot(a.output)
-    else:result=wf.status()
-    print(json.dumps(result if a.command!='snapshot' else dict(snapshot_hash=result['snapshot_hash'],counts=result['counts'],output=str(a.output)),ensure_ascii=False,indent=2))
+    try:
+        if a.command=='run': result=asyncio.run(wf.run())
+        elif a.command=='claim':
+            result=wf.claim(a.kind,a.limit,a.worker)
+            a.output.parent.mkdir(parents=True,exist_ok=True)
+            a.output.write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+        elif a.command=='submit':result=wf.submit(json.loads(a.input.read_text(encoding='utf-8')))
+        elif a.command=='snapshot':
+            from kg_builder.embeddings import create_embedding_model
+            wf.embedding=create_embedding_model(provider=a.embedding_provider,model_name=a.embedding_model,
+                dimension=a.embedding_dimension,cache_dir=a.cache_dir)
+            result=wf.snapshot(a.output)
+        else:result=wf.status()
+        print(json.dumps(result if a.command!='snapshot' else dict(snapshot_hash=result['snapshot_hash'],counts=result['counts'],output=str(a.output)),ensure_ascii=False,indent=2))
+    finally:wf.close()
+
 if __name__=='__main__':main()

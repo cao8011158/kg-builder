@@ -21,6 +21,9 @@ def main(argv=None):
     parser.add_argument('--name-base-url')
     parser.add_argument('--name-model')
     parser.add_argument('--embedding-cache-dir',type=Path)
+    parser.add_argument('--embedding-provider',choices=['fastembed','voyage'])
+    parser.add_argument('--embedding-model')
+    parser.add_argument('--embedding-dimension',type=int,default=1024)
     sub=parser.add_subparsers(dest='command',required=True)
     run=sub.add_parser('run');run.add_argument('--jev-model',default='jev-1.14.0');run.add_argument('--batch-size',type=int,default=32)
     run.add_argument('--jev-concurrency',type=int,default=4)
@@ -33,6 +36,11 @@ def main(argv=None):
     if args.command=='run':
         from kg_builder.decision_api import JevClient
         client=JevClient(model=args.jev_model,max_concurrency=args.jev_concurrency)
+    model=None
+    if args.embedding_provider or args.embedding_model:
+        from kg_builder.embeddings import create_embedding_model
+        model=create_embedding_model(provider=args.embedding_provider or 'fastembed',model_name=args.embedding_model,
+            dimension=args.embedding_dimension,cache_dir=args.embedding_cache_dir)
     k=args.k
     name_mode=args.name_mode
     if args.command!='run' and (args.job_dir/'graph.sqlite').exists():
@@ -41,7 +49,7 @@ def main(argv=None):
             settings=dict(db.execute("SELECT key,value FROM meta WHERE key IN ('k','name_mode')"))
         k=k if k is not None else int(settings['k'])
         name_mode=name_mode or settings['name_mode']
-    job=SnapshotGraph(args.snapshot,args.job_dir,client=client,k=k or 20,name_mode=name_mode or 'external',batch_size=getattr(args,'batch_size',32),name_concurrency=getattr(args,'name_concurrency',3),name_base_url=args.name_base_url,name_model=args.name_model,read_input=args.command=='run',embedding_cache_dir=args.embedding_cache_dir,graph_policy=args.graph_policy,problem_resolution=args.problem_resolution,entity_same_min_probability=args.entity_same_min_probability)
+    job=SnapshotGraph(args.snapshot,args.job_dir,client=client,model=model,k=k or 20,name_mode=name_mode or 'external',batch_size=getattr(args,'batch_size',32),name_concurrency=getattr(args,'name_concurrency',3),name_base_url=args.name_base_url,name_model=args.name_model,read_input=args.command=='run',embedding_cache_dir=args.embedding_cache_dir,graph_policy=args.graph_policy,problem_resolution=args.problem_resolution,entity_same_min_probability=args.entity_same_min_probability)
     try:
         if args.command=='run':result=job.run()
         elif args.command=='claim':

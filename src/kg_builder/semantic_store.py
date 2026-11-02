@@ -105,8 +105,9 @@ class SemanticStore:
             raise RuntimeError('Dense operations require an embedding model')
         return self.model.model_id
 
-    def _embed(self, texts):
-        model_id = self._model_id()
+    def _embed(self, texts, *, query=False):
+        document_id = self._model_id()
+        model_id = getattr(self.model, 'query_model_id', document_id) if query else document_id
         result = [None] * len(texts)
         missing = {}
         for i, value in enumerate(texts):
@@ -119,7 +120,8 @@ class SemanticStore:
                 missing.setdefault(key, (value, []) )[1].append(i)
         if missing:
             keys = list(missing)
-            vectors = self.model.encode([missing[k][0] for k in keys])
+            encode = getattr(self.model, 'encode_query', self.model.encode) if query else self.model.encode
+            vectors = encode([missing[k][0] for k in keys])
             for key, vector in zip(keys, vectors):
                 values = [float(x) for x in vector]
                 self.db.execute('INSERT OR IGNORE INTO embedding_cache VALUES(?,?,?)',
@@ -128,6 +130,9 @@ class SemanticStore:
             self.db.commit()
             self.stats['embeddings_computed'] += len(keys)
         return result
+
+    def _embed_query(self, texts):
+        return self._embed(texts, query=True)
 
     def _index_for(self, kind):
         from .vector_index import HNSWIndex
@@ -170,7 +175,7 @@ class SemanticStore:
         sparse=self._sparse_entities(query,kind,max(100,limit))
         dense=[]
         if self.model:
-            dense=[h['id'] for h in self._index_for(kind).search(self._embed([query])[0],k=max(100,limit))]
+            dense=[h['id'] for h in self._index_for(kind).search(self._embed_query([query])[0],k=max(100,limit))]
         scores={}
         for ranking,weight in ((exact,3),(sparse,1),(dense,1)):
             for i,eid in enumerate(ranking):scores[eid]=scores.get(eid,0)+weight/(60+i+1)
@@ -186,7 +191,7 @@ class SemanticStore:
                 WHERE contribution_fts MATCH ? ORDER BY bm25(contribution_fts) LIMIT ?''',(expression,limit))]
         dense=[]
         if self.model:
-            dense=[h['id'] for h in self._index_for('Contribution').search(self._embed([query])[0],k=limit)]
+            dense=[h['id'] for h in self._index_for('Contribution').search(self._embed_query([query])[0],k=limit)]
         scores={}
         for ranking in (sparse,dense):
             for i,cid in enumerate(ranking):scores[cid]=scores.get(cid,0)+1/(60+i+1)
@@ -203,7 +208,7 @@ class SemanticStore:
                 WHERE research_area_fts MATCH ? ORDER BY bm25(research_area_fts) LIMIT ?''',(expression,limit))]
         dense=[]
         if self.model:
-            dense=[h['id'] for h in self._index_for('ResearchArea').search(self._embed([query])[0],k=limit)]
+            dense=[h['id'] for h in self._index_for('ResearchArea').search(self._embed_query([query])[0],k=limit)]
         scores={}
         for ranking in (sparse,dense):
             for i,area_id in enumerate(ranking):scores[area_id]=scores.get(area_id,0)+1/(60+i+1)

@@ -8,7 +8,9 @@ from .semantic_store import SemanticStore
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--sidecar',required=True)
-    parser.add_argument('--model',default='BAAI/bge-small-en-v1.5',help='Local embedding model')
+    parser.add_argument('--model','--embedding-model',dest='embedding_model',help='Embedding model (provider default when omitted)')
+    parser.add_argument('--embedding-provider',choices=['fastembed','voyage'],default='fastembed')
+    parser.add_argument('--embedding-dimension',type=int,default=1024)
     parser.add_argument('--cache-dir',help='Local model cache directory')
     sub=parser.add_subparsers(dest='command',required=True)
     ingest=sub.add_parser('ingest');ingest.add_argument('--master',required=True)
@@ -33,8 +35,9 @@ def main(argv=None):
     args=parser.parse_args(argv)
     model=None
     if args.command in ('cluster-problems','export-candidates','search'):
-        from .embeddings import EmbeddingModel
-        model=EmbeddingModel(model_name=args.model,cache_dir=args.cache_dir)
+        from .embeddings import create_embedding_model
+        model=create_embedding_model(provider=args.embedding_provider,model_name=args.embedding_model,
+            dimension=args.embedding_dimension,cache_dir=args.cache_dir)
     store=SemanticStore(args.sidecar,model=model)
     try:
         if args.command=='ingest': result=store.ingest(args.master,args.extraction_id)
