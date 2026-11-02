@@ -1,4 +1,4 @@
-"""Command line entry point for the reviewed semantic sidecar."""
+"""Command line entry point for the reviewed PostgreSQL semantic registry."""
 import argparse
 import json
 from pathlib import Path
@@ -7,7 +7,7 @@ from .semantic_store import SemanticStore
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--sidecar',required=True)
+    parser.add_argument('--run-id',required=True,help='PostgreSQL graph run identity')
     parser.add_argument('--model','--embedding-model',dest='embedding_model',help='Embedding model (provider default when omitted)')
     parser.add_argument('--embedding-provider',choices=['fastembed','voyage'],default='fastembed')
     parser.add_argument('--embedding-dimension',type=int,default=1024)
@@ -16,7 +16,7 @@ def main(argv=None):
     parser.add_argument('--voyage-rpm',type=int,default=2000)
     parser.add_argument('--voyage-tpm',type=int,default=3000000)
     sub=parser.add_subparsers(dest='command',required=True)
-    ingest=sub.add_parser('ingest');ingest.add_argument('--master',required=True)
+    ingest=sub.add_parser('ingest');ingest.add_argument('--source-run-id',required=True,help='Native PostgreSQL source run identity')
     ingest.add_argument('--extraction-id',action='append',required=True)
     cluster=sub.add_parser('cluster-problems');cluster.add_argument('--output',required=True)
     cluster.add_argument('--k',type=int,default=20)
@@ -44,8 +44,8 @@ def main(argv=None):
             requests_per_minute=args.voyage_rpm,tokens_per_minute=args.voyage_tpm)
     store=None
     try:
-        store=SemanticStore(args.sidecar,model=model)
-        if args.command=='ingest': result=store.ingest(args.master,args.extraction_id)
+        store=SemanticStore(args.run_id,model=model)
+        if args.command=='ingest': result=store.ingest(args.source_run_id,args.extraction_id)
         elif args.command=='cluster-problems':result=store.cluster_problems(
             k=args.k,min_similarity=args.min_similarity,resolution=args.resolution,seed=args.seed)
         elif args.command=='export-candidates':result=store.export_candidates(args.kind,args.limit,args.offset,args.k)

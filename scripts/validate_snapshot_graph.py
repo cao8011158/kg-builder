@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit a frozen snapshot graph without changing its job databases."""
+"""Audit a frozen snapshot graph without changing its PostgreSQL graph run."""
 import argparse
 import json
 import os
@@ -11,7 +11,7 @@ from kg_builder.graph_validation import validate_graph
 
 
 def _check_output_path(output, snapshot, job_dir, cases):
-    protected=[snapshot, *(job_dir/name for name in ('graph.sqlite','semantic.sqlite','snapshot-master.sqlite'))]
+    protected=[snapshot, *(job_dir/name for name in ('graph-job.json','problem-proposal.json','retrieval-index.json'))]
     if cases is not None:protected.append(cases)
     target=output.resolve()
     for source in protected:
@@ -23,6 +23,7 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--snapshot',type=Path,required=True)
     parser.add_argument('--job-dir',type=Path,required=True)
+    parser.add_argument('--run-id',help='Explicit PostgreSQL graph run identity; otherwise read graph-job.json')
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--cases',type=Path)
     parser.add_argument('--cache-dir',type=Path)
@@ -53,7 +54,7 @@ def main(argv=None):
                 model=embedding_model_from_id(next(iter(model_ids)),cache_dir=args.cache_dir,**voyage_options)
             if any(row['model_id'] != model.model_id for row in snapshot['vectors']):
                 raise ValueError('Embedding model differs from snapshot')
-        result=validate_graph(args.snapshot,args.job_dir,cases,model)
+        result=validate_graph(args.snapshot,args.job_dir,cases,model,run_id=args.run_id)
         args.output.parent.mkdir(parents=True,exist_ok=True)
         args.output.write_text(json.dumps(result,indent=2,ensure_ascii=False)+'\n',encoding='utf-8')
         print(json.dumps({'output':str(args.output),'structural':result['structural']['passed'],'quality':result['quality']['status']}))

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Build a separate graph job from an immutable preparation snapshot."""
 import argparse
-from contextlib import closing
 import json
 import sys
 from pathlib import Path
@@ -14,6 +13,7 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--snapshot',required=True,type=Path)
     parser.add_argument('--job-dir',required=True,type=Path)
+    parser.add_argument('--run-id',help='Explicit PostgreSQL graph run identity; otherwise reuse/create graph-job.json')
     parser.add_argument('--k',type=int)
     parser.add_argument('--name-mode',choices=['external','api'])
     parser.add_argument('--graph-policy',choices=['legacy','domain-v1'])
@@ -31,22 +31,14 @@ def main(argv=None):
     parser.add_argument('--neo4j',action='store_true',help='Publish approved graph events using NEO4J_* environment variables')
     sub=parser.add_subparsers(dest='command',required=True)
     run=sub.add_parser('run');run.add_argument('--jev-model',default='jev-1.14.0');run.add_argument('--batch-size',type=int,default=32)
-    run.add_argument('--jev-concurrency',type=int,default=4)
+    run.add_argument('--jev-concurrency',type=int,default=8,help='Shared Jev HTTP concurrency limit (default: 8); also bounds in-flight pair batches')
     run.add_argument('--name-concurrency',type=int,default=3)
     claim=sub.add_parser('claim');claim.add_argument('--worker',required=True);claim.add_argument('--limit',type=int,default=5);claim.add_argument('--output',required=True,type=Path)
     submit=sub.add_parser('submit');submit.add_argument('--input',required=True,type=Path)
     submit.add_argument('--jev-model',default='jev-1.14.0')
-    submit.add_argument('--jev-concurrency',type=int,default=4)
+    submit.add_argument('--jev-concurrency',type=int,default=8,help='Shared Jev HTTP concurrency limit (default: 8); also bounds in-flight pair batches')
     sub.add_parser('status')
     args=parser.parse_args(argv)
-    k=args.k
-    name_mode=args.name_mode
-    if args.command!='run' and (args.job_dir/'graph.sqlite').exists():
-        import sqlite3
-        with closing(sqlite3.connect(args.job_dir/'graph.sqlite')) as db:
-            settings=dict(db.execute("SELECT key,value FROM meta WHERE key IN ('k','name_mode')"))
-        k=k if k is not None else int(settings['k'])
-        name_mode=name_mode or settings['name_mode']
     client=model=publisher=job=None
     voyage_options=dict(max_concurrency=args.voyage_concurrency,
         requests_per_minute=args.voyage_rpm,tokens_per_minute=args.voyage_tpm)
@@ -62,7 +54,7 @@ def main(argv=None):
             model=create_embedding_model(provider=args.embedding_provider or 'fastembed',model_name=args.embedding_model,
                 dimension=args.embedding_dimension,cache_dir=args.embedding_cache_dir,**voyage_options)
         job=SnapshotGraph(args.snapshot,args.job_dir,client=client,model=model,publisher=publisher,
-            voyage_options=voyage_options,k=k or 20,name_mode=name_mode or 'external',
+            voyage_options=voyage_options,k=args.k,name_mode=args.name_mode,run_id=args.run_id,
             batch_size=getattr(args,'batch_size',32),name_concurrency=getattr(args,'name_concurrency',3),
             name_base_url=args.name_base_url,name_model=args.name_model,read_input=args.command=='run',
             embedding_cache_dir=args.embedding_cache_dir,graph_policy=args.graph_policy,

@@ -1,7 +1,13 @@
+import concurrent.futures
+import time
+import threading
 import copy
 import json
 from pathlib import Path
-import sqlite3
+import os
+import uuid
+import psycopg
+from psycopg import sql
 import sys
 import tempfile
 import unittest
@@ -9,7 +15,12 @@ import unittest
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'src'))
 from kg_builder.semantic_store import SemanticStore, REVIEW_VERSION
-from kg_builder.storage import connect,upsert_paper,ingest_extraction
+from kg_builder.postgres_graph import GraphStore
+from kg_builder.postgres_source import PostgresSourceRepository
+
+_REPOS={}
+def ingest_extraction(conn,payload):
+    with conn.transaction():return _REPOS[id(conn)].ingest_extraction(conn,payload)
 from kg_builder.extraction_validation import RETRIEVAL_SCHEMA_VERSION
 
 class FakeModel:
@@ -51,74 +62,39 @@ class SemanticTests(unittest.TestCase):
             self.store.import_research_areas([{'area_id':'area:bad','name':'Bad','description':'Bad'}],
                 [{'area_id':'area:bad','mention_id':self.packet('Method')['mention_id']}])
         self.assertIsNone(self.store.get_entity('area:bad'))
-        plan=self.store.db.execute('''EXPLAIN QUERY PLAN SELECT m.mention_id,s.paper_id
-            FROM research_area_members a JOIN mentions m ON m.mention_id=a.mention_id
-            JOIN sources s ON s.extraction_id=m.extraction_id WHERE a.area_id=?
-            ORDER BY a.mention_id LIMIT ? OFFSET ?''',('area:memory',21,0)).fetchall()
-        self.assertTrue(any('sqlite_autoindex_research_area_members_1' in str(tuple(r)) for r in plan))
-        self.assertTrue(any('sqlite_autoindex_mentions_1' in str(tuple(r)) for r in plan))
-        paper_plan=self.store.db.execute('''EXPLAIN QUERY PLAN SELECT DISTINCT s.paper_id
-            FROM research_area_members a JOIN mentions m ON m.mention_id=a.mention_id
-            JOIN sources s ON s.extraction_id=m.extraction_id WHERE a.area_id=?
-            ORDER BY s.paper_id LIMIT ?''',('area:memory',2)).fetchall()
-        self.assertTrue(any('sqlite_autoindex_research_area_members_1' in str(tuple(r)) for r in paper_plan))
-        sparse_plan=self.store.db.execute('''EXPLAIN QUERY PLAN SELECT area_id FROM research_area_fts
-            WHERE research_area_fts MATCH ? ORDER BY bm25(research_area_fts) LIMIT ?''',('retention',100)).fetchall()
-        self.assertTrue(any('VIRTUAL TABLE INDEX' in str(tuple(r)) for r in sparse_plan))
+        # Native PostgreSQL plans and bounded response work replace SQLite VM counters.
         def measured_detail():
-            steps=[0]
-            def progress():
-                steps[0]+=1
-                return 0
-            self.store.db.set_progress_handler(progress,1)
             before=self.store.stats['detail_rows']
-            try: result=self.store.get_entity('area:memory',limit=1)
-            finally:self.store.db.set_progress_handler(None,0)
-            return steps[0],self.store.stats['detail_rows']-before,len(json.dumps(result))
-        cold=measured_detail();warm=measured_detail()
-        def measured_search():
-            steps=[0]
-            def progress():steps[0]+=1;return 0
-            self.store.db.set_progress_handler(progress,1)
-            before=self.store.stats['embeddings_computed']
-            try: result=self.store.search('retention',kind='ResearchArea',limit=1,expand_limit=1)
-            finally:self.store.db.set_progress_handler(None,0)
-            return (steps[0],self.store.stats['embeddings_computed']-before,
-                    len(json.dumps(result)),result['results'][0]['entity_id'])
-        search_baseline=measured_search()
-        with self.store.db:
-            for i in range(1000):
-                aid=f'area:unrelated:{i}'
-                self.store.db.execute('INSERT INTO research_areas VALUES(?,?,?,?)',
-                                      (aid,'Elsewhere','Z'*10000,f'rev:{i}'))
-                self.store.db.execute('INSERT INTO research_area_fts VALUES(?,?,?)',
-                                      (aid,'Elsewhere','Z'*10000))
-        enlarged=measured_detail()
-        print(f'area_detail_vm cold={cold} warm={warm} unrelated_1000={enlarged}')
-        self.assertEqual(cold[1:],warm[1:])
-        self.assertEqual(warm[1:],enlarged[1:])
-        self.assertLess(enlarged[0]-warm[0],100)
-        self.store._indexes.pop('ResearchArea',None)  # Fixture inserted rows outside the import API.
-        search_cold=measured_search();search_warm=measured_search()
-        print(f'area_search_vm baseline={search_baseline} unrelated_1000_cold={search_cold} warm={search_warm}')
-        self.assertEqual(search_cold[3:],('area:memory',))
-        self.assertEqual(search_warm[3:],('area:memory',))
-        self.assertEqual(search_cold[2],search_warm[2])
-        self.assertEqual(search_baseline[3],search_warm[3])
-        self.assertLess(search_warm[2],500)
-        self.assertLess(search_warm[0]-search_baseline[0],100)
+            value=self.store.get_entity('area:memory',limit=1)
+            return self.store.stats['detail_rows']-before,len(json.dumps(value))
+        baseline=measured_detail()
+        with self.store.db.transaction():
+            with self.store.db.cursor() as cursor:
+                cursor.executemany('INSERT INTO research_areas VALUES(%s,%s,%s,%s)',
+                    [(f'area:unrelated:{i}','Elsewhere','Z'*10000,f'rev:{i}') for i in range(1000)])
+        self.assertEqual(measured_detail(),baseline)
+        self.assertEqual(self.store.search('retention',kind='ResearchArea')['results'][0]['entity_id'],'area:memory')
+        self.assert_index('SELECT m.mention_id,s.paper_id FROM research_area_members a '
+            'JOIN mentions m ON m.mention_id=a.mention_id JOIN sources s ON s.extraction_id=m.extraction_id '
+            'WHERE a.area_id=%s ORDER BY a.mention_id LIMIT %s',('area:memory',2),
+            'research_area_members_pkey')
+        self.assert_index("SELECT area_id FROM research_area_fts WHERE search_vector @@ to_tsquery('simple',%s)",
+                          ('retention',),'research_area_fts_search')
         changed=copy.deepcopy(self.payload)
         changed['research_problems'][0]['description']='Changed source problem'
         ingest_extraction(self.db,changed)
         self.store.ingest(self.master,[self.eid])
-        self.assertEqual(self.store.db.execute('SELECT count(*) FROM research_area_members WHERE area_id=?',
-                                               ('area:memory',)).fetchone()[0],0)
+        self.assertEqual(self.store.db.execute('SELECT count(*) FROM research_area_members WHERE area_id=%s',
+                                               ('area:memory',)).fetchone()['count'],0)
 
     def setUp(self):
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
-        self.root=Path(temp.name);self.master=self.root/'master.db'
-        self.db=connect(self.master);self.addCleanup(self.db.close)
-        self.paper,self.version=upsert_paper(self.db,{'title':'Memory Paper','arxiv_id':'2501.12345',
+        self.root=Path(temp.name);self.master='semantic-test-'+uuid.uuid4().hex
+        self.database_url=os.environ['KG_TEST_DATABASE_URL']
+        self.graph=GraphStore(self.master,self.database_url)
+        self.db=self.graph.db;repo=PostgresSourceRepository(self.graph);_REPOS[id(self.db)]=repo
+        self.addCleanup(self.cleanup_database)
+        with self.db.transaction():self.paper,self.version=repo.upsert_paper(self.db,{'title':'Memory Paper','arxiv_id':'2501.12345',
             'version_label':'v1','url':'https://arxiv.org/abs/2501.12345v1'},'arxiv','2501.12345','q')
         self.payload={'schema_version':RETRIEVAL_SCHEMA_VERSION,'paper_id':self.paper,
             'version_id':self.version,'paper_version':{'version_label':'v1','source_url':'https://arxiv.org/abs/2501.12345v1'},
@@ -130,7 +106,7 @@ class SemanticTests(unittest.TestCase):
             'benchmarks':[{'key':'b1','name':'Memory benchmark','description':'Tests recall',
                            'roles':['used'],'version_or_subset':'subset A'}]}
         self.eid=ingest_extraction(self.db,self.payload)
-        self.model=FakeModel();self.store=SemanticStore(self.root/'semantic.db',self.model)
+        self.model=FakeModel();self.store=SemanticStore(self.master,self.model,database_url=self.database_url)
         self.addCleanup(self.store.close)
 
     def packet(self,kind='ResearchProblem'):
@@ -180,18 +156,18 @@ class SemanticTests(unittest.TestCase):
     def test_kind_first_candidate_and_alias_sparse(self):
         self.store.ingest(self.master,[self.eid])
         # The method representation must survive a larger wrong-kind population.
-        with self.store.db:
+        with self.store.db.transaction():
             for i in range(40):
                 eid=f'rp:wrong:{i}'
-                self.store.db.execute('INSERT INTO entities VALUES(?,?,?,?,?,?,?)',
+                self.store.db.execute('INSERT INTO entities VALUES(%s,%s,%s,%s,%s,%s,%s)',
                     (eid,'ResearchProblem','Memory retrieval','Retrieve memory',
                      'reviewer_generated','[]',f'rev:{i}'))
-            self.store.db.execute('INSERT INTO entities VALUES(?,?,?,?,?,?,?)',
+            self.store.db.execute('INSERT INTO entities VALUES(%s,%s,%s,%s,%s,%s,%s)',
                 ('method:alias','Method','Archival lookup','Retrieve memory',
                  'source_authored','["Memory retrieval"]','rev:method'))
-            self.store.db.execute('INSERT INTO entity_fts VALUES(?,?,?,?)',
+            self.store.db.execute('INSERT INTO entity_fts(entity_id,name,description,aliases) VALUES(%s,%s,%s,%s)',
                 ('method:alias','Archival lookup','Retrieve memory','Memory retrieval'))
-            self.store.db.execute('INSERT INTO entity_surfaces VALUES(?,?,?)',
+            self.store.db.execute('INSERT INTO entity_surfaces VALUES(%s,%s,%s)',
                 ('Method','memory retrieval','method:alias'))
         packet=self.packet('Method')
         self.assertIn('method:alias',[c['entity_id'] for c in packet['candidates']])
@@ -232,14 +208,14 @@ class SemanticTests(unittest.TestCase):
                             'description':'Retrieve memory','aliases':['LoCoMo']}],
                'assignments':[self.assignment(method,'new_entity','method:primary')]}
         self.store.import_review(first)
-        with self.store.db:
+        with self.store.db.transaction():
             for i in range(20):
                 eid=f'method:distractor:{i}'
-                self.store.db.execute('INSERT INTO entities VALUES(?,?,?,?,?,?,?)',
+                self.store.db.execute('INSERT INTO entities VALUES(%s,%s,%s,%s,%s,%s,%s)',
                     (eid,'Method','Memory pattern','Memory retrieval text','source_authored','[]',f'rev:{i}'))
-                self.store.db.execute('INSERT INTO entity_fts VALUES(?,?,?,?)',
+                self.store.db.execute('INSERT INTO entity_fts(entity_id,name,description,aliases) VALUES(%s,%s,%s,%s)',
                     (eid,'Memory pattern','Memory retrieval text',''))
-                self.store.db.execute('INSERT INTO entity_surfaces VALUES(?,?,?)',
+                self.store.db.execute('INSERT INTO entity_surfaces VALUES(%s,%s,%s)',
                     ('Method','memory pattern',eid))
         # Test the cold index after adding independent distractors in this test fixture.
         self.store._indexes.pop('Method',None)
@@ -249,10 +225,8 @@ class SemanticTests(unittest.TestCase):
         eid=ingest_extraction(self.db,other);self.store.ingest(self.master,[eid])
         candidate=self.store.export_candidates('Method')['mentions'][0]
         self.assertEqual(candidate['candidates'][0]['entity_id'],'method:primary')
-        plan=self.store.db.execute('EXPLAIN QUERY PLAN SELECT entity_id FROM entity_surfaces '
-            'WHERE kind=? AND normalized_name=? ORDER BY entity_id LIMIT ?',
-            ('Method','locomo',8)).fetchall()
-        self.assertTrue(any('entity_surfaces' in str(tuple(r)) and 'INDEX' in str(tuple(r)) for r in plan))
+        self.assert_index('SELECT entity_id FROM entity_surfaces WHERE kind=%s AND normalized_name=%s '
+                          'ORDER BY entity_id LIMIT %s',('Method','locomo',8),'entity_surfaces_pkey')
 
     def test_changed_source_revokes_old_membership_and_stale_packet(self):
         self.store.ingest(self.master,[self.eid]);packet=self.packet()
@@ -322,16 +296,137 @@ class SemanticTests(unittest.TestCase):
             self.store.import_review(altered)
         with self.assertRaises(ValueError):self.store.ingest(self.master,[self.eid,self.eid])
         # Large unrelated content stays outside the ID detail query and its response.
-        self.store.db.executemany('INSERT INTO entities VALUES(?,?,?,?,?,?,?)',
+        self.store.db.cursor().executemany('INSERT INTO entities VALUES(%s,%s,%s,%s,%s,%s,%s)',
              [(f'unrelated:{i}','Method','x','z'*10000,'source_authored','[]',f'r{i}') for i in range(500)])
         self.store.db.commit()
         before=self.store.stats['detail_rows']
         detail=self.store.get_entity('rp:x',limit=1)
         self.assertEqual(self.store.stats['detail_rows']-before,2)
         self.assertLess(len(json.dumps(detail)),2000)
-        plan=self.store.db.execute('''EXPLAIN QUERY PLAN SELECT m.mention_id,s.paper_id FROM mentions m
-            JOIN sources s ON s.extraction_id=m.extraction_id WHERE m.entity_id=?
-            ORDER BY m.mention_id LIMIT ? OFFSET ?''',('rp:x',2,0)).fetchall()
-        self.assertTrue(any('mentions_entity' in str(tuple(x)) for x in plan))
+        self.assert_index('SELECT m.mention_id,s.paper_id FROM mentions m JOIN sources s '
+            'ON s.extraction_id=m.extraction_id WHERE m.entity_id=%s ORDER BY m.mention_id LIMIT %s OFFSET %s',
+            ('rp:x',2,0),'mentions_entity')
+
+    def concurrent_imports(self,reviews,mids):
+        def worker(index):
+            store=SemanticStore(self.master,FakeModel(),database_url=self.database_url)
+            try:
+                store.db.execute("SELECT set_config('application_name',%s,false)",
+                                 (self.master+':race:'+str(index),))
+                try:return store.import_review(reviews[index])
+                except ValueError as error:return {'status':'rejected','reason':str(error)}
+            finally:store.close()
+        # Hold the common mention rows until both real backends are blocked.
+        # Old code reaches its unguarded UPDATE and then both imports succeed;
+        # guarded code waits before validating the pending state.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            with self.db.transaction():
+                self.db.execute('SELECT mention_id FROM mentions WHERE mention_id=ANY(%s) '
+                                'ORDER BY mention_id FOR UPDATE',(sorted(mids),)).fetchall()
+                futures=[pool.submit(worker,index) for index in range(2)]
+                deadline=time.monotonic()+15
+                while time.monotonic()<deadline:
+                    self.db.execute('SELECT pg_stat_clear_snapshot()')
+                    blocked=self.db.execute("SELECT count(*) AS n FROM pg_stat_activity WHERE "
+                        "application_name LIKE %s AND cardinality(pg_blocking_pids(pid))>0",
+                        (self.master+':race:%',)).fetchone()['n']
+                    if blocked==2:break
+                    time.sleep(.01)
+                else:raise AssertionError('Concurrent import backends did not reach native lock waits')
+            return [future.result(timeout=20) for future in futures]
+
+    def make_review(self,review_id,packets,prefix):
+        entities=[];assignments=[]
+        for index,packet in enumerate(packets):
+            eid=prefix+str(index)
+            entities.append({'entity_id':eid,'kind':packet['kind'],'name':packet['name'],
+                             'description':'Concurrent reviewed entity','aliases':[]})
+            assignments.append(self.assignment(packet,'new_entity',eid))
+        return {'schema_version':REVIEW_VERSION,'review_id':review_id,
+                'entities':entities,'assignments':assignments}
+
+    def test_concurrent_reviews_exclude_stale_assignment_and_orphans(self):
+        self.store.ingest(self.master,[self.eid]);packet=self.packet()
+        reviews=[self.make_review('race:'+str(i),[packet],'rp:race:'+str(i)+':') for i in range(2)]
+        outcomes=self.concurrent_imports(reviews,[packet['mention_id']])
+        self.assertEqual(sorted(x['status'] for x in outcomes),['imported','rejected'])
+        for table in ('entities','entity_fts','entity_surfaces','reviews'):
+            self.assertEqual(self.db.execute('SELECT count(*) AS n FROM '+table).fetchone()['n'],1)
+        self.assertEqual(self.db.execute('SELECT count(*) AS n FROM entities e WHERE NOT EXISTS '
+            '(SELECT 1 FROM mentions m WHERE m.entity_id=e.entity_id)').fetchone()['n'],0)
+
+    def test_concurrent_identical_review_is_idempotent(self):
+        self.store.ingest(self.master,[self.eid]);packet=self.packet()
+        review=self.make_review('same-review',[packet],'rp:identical:')
+        outcomes=self.concurrent_imports([review,copy.deepcopy(review)],[packet['mention_id']])
+        self.assertEqual(sorted(x['status'] for x in outcomes),['imported','unchanged'])
+        self.assertEqual(self.db.execute('SELECT count(*) AS n FROM reviews').fetchone()['n'],1)
+
+    def test_reversed_multi_mention_reviews_use_canonical_locks(self):
+        self.store.ingest(self.master,[self.eid]);packets=[self.packet(),self.packet('Method')]
+        reviews=[self.make_review('multi:0',packets,'entity:multi:0:'),
+                 self.make_review('multi:1',list(reversed(packets)),'entity:multi:1:')]
+        outcomes=self.concurrent_imports(reviews,[p['mention_id'] for p in packets])
+        self.assertEqual(sorted(x['status'] for x in outcomes),['imported','rejected'])
+        self.assertEqual(self.db.execute('SELECT count(*) AS n FROM entities').fetchone()['n'],2)
+        self.assertEqual(self.db.execute('SELECT count(*) AS n FROM reviews').fetchone()['n'],1)
+
+    def test_source_replacement_excludes_stale_concurrent_review(self):
+        self.store.ingest(self.master,[self.eid]);packet=self.packet()
+        changed=copy.deepcopy(self.payload)
+        changed['research_problems'][0]['description']='Replaced source problem'
+        ingest_extraction(self.db,changed)
+        locked=threading.Event();release=threading.Event()
+        class HeldSourceConnection:
+            def __init__(self,db):self.db=db
+            def __getattr__(self,name):return getattr(self.db,name)
+            def execute(self,query,args=None):
+                cursor=self.db.execute(query,args)
+                if 'SELECT extraction_id FROM sources WHERE extraction_id=ANY' in str(query):
+                    locked.set()
+                    if not release.wait(15):raise AssertionError('Source lock release was not signaled')
+                return cursor
+        def replace():
+            store=SemanticStore(self.master,FakeModel(),database_url=self.database_url)
+            try:
+                store.db=HeldSourceConnection(store.db)
+                return store.ingest(self.master,[self.eid])
+            finally:store.close()
+        def review():
+            store=SemanticStore(self.master,FakeModel(),database_url=self.database_url)
+            try:
+                store.db.execute("SELECT set_config('application_name',%s,false)",(self.master+':source-review',))
+                try:return store.import_review(self.make_review('source-race',[packet],'rp:stale:'))
+                except ValueError as error:return {'status':'rejected','reason':str(error)}
+            finally:store.close()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            replacement=pool.submit(replace)
+            self.assertTrue(locked.wait(15))
+            reviewing=pool.submit(review)
+            try:
+                deadline=time.monotonic()+15
+                while time.monotonic()<deadline:
+                    blocked=self.db.execute("SELECT cardinality(pg_blocking_pids(pid)) AS n FROM pg_stat_activity "
+                        "WHERE application_name=%s",(self.master+':source-review',)).fetchone()
+                    if blocked and blocked['n']>0:break
+                    time.sleep(.01)
+                else:raise AssertionError('Review did not wait for native source replacement lock')
+            finally:release.set()
+            self.assertEqual(replacement.result(timeout=20)[0]['status'],'replaced')
+            self.assertEqual(reviewing.result(timeout=20)['status'],'rejected')
+        for table in ('entities','entity_fts','entity_surfaces','reviews'):
+            self.assertEqual(self.db.execute('SELECT count(*) AS n FROM '+table).fetchone()['n'],0)
+
+    def assert_index(self,query,args,index):
+        with self.store.db.transaction():
+            self.store.db.execute('SET LOCAL enable_seqscan=off')
+            plan=self.store.db.execute('EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) '+query,args).fetchone()['QUERY PLAN']
+        self.assertIn(index,json.dumps(plan))
+
+    def cleanup_database(self):
+        _REPOS.pop(id(self.db),None)
+        self.graph.close()
+        with psycopg.connect(self.database_url,autocommit=True) as conn:
+            conn.execute(sql.SQL('DROP SCHEMA {} CASCADE').format(sql.Identifier(self.graph.schema)))
 
 if __name__=='__main__':unittest.main()

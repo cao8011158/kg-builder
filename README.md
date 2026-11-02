@@ -17,16 +17,16 @@ The corpus is a **candidate metadata pool** until a relevance review is performe
   `python scripts/prepare_pipeline.py --run-id fresh60 --run-dir /private/run60 run`.
   Reuse that logical ID for claim, submit, status and snapshot. Full pagination
   uses `scripts/prepare_full_pipeline.py`. See [PostgreSQL preparation](docs/POSTGRES_PREPARATION.md).
-- `scripts/build_snapshot_graph.py --snapshot <prepared.json> --job-dir <graph-job> --neo4j run` publishes approved domain graph events to Neo4j. Configure `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD` and optional `NEO4J_DATABASE` in the process environment. SQLite remains the graph job queue, audit and semantic cache; PostgreSQL remains preparation authority. See [embedding and graph configuration](docs/EMBEDDINGS.md).
+- `scripts/build_snapshot_graph.py --snapshot <prepared.json> --job-dir <graph-job> --neo4j run` publishes approved domain graph events to Neo4j. Configure `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD` and optional `NEO4J_DATABASE` in the process environment. PostgreSQL owns graph source pins, queue, audit, proposals, semantic registry, embedding cache and Neo4j outbox. Set `KG_GRAPH_DATABASE_URL` (or `KG_DATABASE_URL` / `DATABASE_URL`); the job directory holds a credential-free `graph-job.json` run identity. See [PostgreSQL graph operations](docs/POSTGRES_GRAPH.md).
 - The SQLite corpus commands below are historical explicit-path workflows; they
   do not feed a new PostgreSQL preparation run.
 - `scripts/collect_papers.py`: source search from OpenAlex, Semantic Scholar, and arXiv; candidate date gate, topic tagging and SQLite upsert. This CLI does **not** invoke any LLM.
 - `src/kg_builder/collectors.py`: real HTTP API collectors, retry/backoff, source record capture. Network API calls have **not** been executed or tested in the original restricted environment.
 - `src/kg_builder/storage.py`: SQLite Paper / PaperVersion / source record / extraction record / discovery hit / topic tables. Strong-ID dedup is partial; nonmatching IDs are not blindly merged by title.
 - `scripts/import_reviewed.py`: accepts JSON extraction records produced and reviewed independently; does not invoke LLM.
-- `scripts/apply_corpus_batch.py`: validates complete fixed manifests, relevance reviews and version-pinned v0.3 extractions before optional atomic master writes and retryable sidecar import. See [the corpus batch workflow](docs/CORPUS_BATCH_WORKFLOW.md).
+- `scripts/apply_corpus_batch.py` is retired: both its CLI and imported `run` refuse before opening storage or writing files. Use native PostgreSQL preparation and snapshot graph commands; [the corpus batch workflow](docs/CORPUS_BATCH_WORKFLOW.md) is historical.
 - `src/kg_builder/extraction_api.py`: optional, **disabled by default; live API not exercised**, OpenAI-compatible draft extractor. Its v0.3 output must match the requested paper/version and schema; collection does not trigger it.
-- `scripts/semantic_pipeline.py`: explicit selected-source import into a separate SQLite semantic sidecar, candidate problem clustering, review export/import and hybrid retrieval. See [the semantic workflow](docs/SEMANTIC_PIPELINE.md).
+- `scripts/semantic_pipeline.py`: explicit selected-source import between native PostgreSQL runs, candidate problem clustering, review export/import and hybrid retrieval. See [PostgreSQL graph operations](docs/POSTGRES_GRAPH.md).
 - `scripts/scheduled_refresh.py` and `src/kg_builder/incremental_update.py`: **disabled/unfinished** scheduled ingestion placeholders. Do not report them as operating background jobs.
 - `config/discovery_queries.json`: current three-domain queries; each source has different search syntax and must be validated in a network-enabled runtime.
 
@@ -53,7 +53,7 @@ For local CPU embeddings, HNSW and Leiden:
 
 ```bash
 python -m pip install -e '.[semantic]'
-python scripts/semantic_pipeline.py --sidecar data/semantic.sqlite3 ingest --master data/research_knowledge.sqlite3 --extraction-id extr:SELECTED_ID
+python scripts/semantic_pipeline.py --run-id semantic-reviewed ingest --source-run-id prepared-graph --extraction-id extr:SELECTED_ID
 ```
 
 Initial problem clustering proposes groups; reviewed decisions alone establish canonical identities. New descriptions retrieve existing group/entity representatives. Method and benchmark identity is never merged merely because vectors are close.
@@ -62,11 +62,11 @@ Initial problem clustering proposes groups; reviewed decisions alone establish c
 
 The SQLite database and extraction drafts are intentionally **not tracked in this public Git repository**. The current 365-candidate review and its accepted extraction/semantic data are saved in the user's existing connected project, with per-batch snapshots and audit packets. The first bootstrap sample (20 paper records, 20 abstract-level drafts) resides in the user's connected Google Drive project folder, not in the repository. That sample was sourced from publicly accessible paper pages; it was **not** obtained by the three live API collectors and is **not** an exhaustive review.
 
-Write to a local SQLite copy and sync it back to Drive only after consistent backup and integrity checking. Keep a snapshot and avoid concurrent writers. Use the current scope and extraction/workflow guides above; older handoff and six-domain pilot documents are historical. The semantic sidecar is a snapshot of explicitly ingested source records; re-ingest changed extraction IDs before reviewing their new candidates.
+Write to a local SQLite copy and sync it back to Drive only after consistent backup and integrity checking. Keep a snapshot and avoid concurrent writers. Use the current scope and extraction/workflow guides above; older handoff and six-domain pilot documents are historical. The PostgreSQL semantic registry contains explicitly ingested source records; re-ingest changed extraction IDs before reviewing their new candidates.
 
 ## Streaming preparation and snapshot graph test
 
-New runs use independently keyed item review and bounded concurrency. A failed item gets one repair, then is dropped from downstream after a second failed review; other approved items remain usable. Completeness diagnostics no longer gate whole papers. Jev requests share a configurable budget of four, while generative API preparation/naming use three workers. Old run configurations preserve their original policy. See [the current contract](docs/PARALLEL_ITEM_WORKFLOW_CONTRACT.md) and [the fresh parallel60 report](docs/reviews/parallel60-20261101/STAGE_REPORT.md). The following timing paragraph describes the earlier paper-gate test.
+New runs use independently keyed item review and bounded concurrency. A failed item gets one repair, then is dropped from downstream after a second failed review; other approved items remain usable. Completeness diagnostics no longer gate whole papers. Graph Jev requests share a configurable budget of eight, while generative API preparation/naming use three workers. Old run configurations preserve their original policy. See [the current contract](docs/PARALLEL_ITEM_WORKFLOW_CONTRACT.md) and [the fresh parallel60 report](docs/reviews/parallel60-20261101/STAGE_REPORT.md). The following timing paragraph describes the earlier paper-gate test.
 
 The [streaming workflow](docs/STREAMING_WORKFLOW.md) now owns source collection/cleaning, one Jev scope decision, external/API draft tasks, Jev field checks and bounded repairs, durable leases and an immutable prepared vector snapshot. A separate graph job consumes that whole snapshot and measures candidate construction, identity/coherence decisions, naming and retrieval index construction. Preparation never builds shared entities or neighbor graphs. OpenAlex and arXiv are the only sources in the new run.
 

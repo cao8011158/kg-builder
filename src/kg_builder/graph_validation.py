@@ -4,249 +4,273 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import sqlite3
-import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
 
 from .semantic_store import KINDS, SemanticStore, digest
+from .postgres_graph import SCHEMA_REVISION
 from .snapshot_graph import canonical_hash, read_snapshot
 
 FIELDS = {**KINDS, 'contributions': 'Contribution'}
 DETAIL_LIMIT = 20
 
 
-def _read_db(path):
-    if not Path(path).is_file():
-        raise ValueError(f'Missing graph artifact: {path}')
-    db = sqlite3.connect(f'file:{Path(path).resolve().as_posix()}?mode=ro', uri=True)
-    db.row_factory = sqlite3.Row
-    db.execute('PRAGMA query_only=ON')
-    return db
+def validate_graph(snapshot_path, job_dir, cases=None, model=None, *, run_id=None, database_url=None):
+    """Audit one PostgreSQL REPEATABLE READ, READ ONLY snapshot, including queries.
 
-
-def validate_graph(snapshot_path, job_dir, cases=None, model=None):
-    """Return bounded failures and counts; never write to the graph job."""
-    snapshot_path = Path(snapshot_path)
-    snapshot, file_hash = read_snapshot(snapshot_path)
+    The descriptor is read without creating or modifying job artifacts. Query
+    embeddings missing from the persisted cache are transient in readonly mode.
+    """
     job_dir = Path(job_dir)
-    graph = _read_db(job_dir / 'graph.sqlite')
-    store = _read_db(job_dir / 'semantic.sqlite')
-    master = _read_db(job_dir / 'snapshot-master.sqlite')
+    try:
+        descriptor = json.loads((job_dir / 'graph-job.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        raise ValueError('A PostgreSQL graph-job.json descriptor is required') from None
+    if (not isinstance(descriptor, dict) or descriptor.get('backend') != 'postgresql'
+            or descriptor.get('revision') != SCHEMA_REVISION
+            or not isinstance(descriptor.get('run_id'), str) or not descriptor['run_id'].strip()):
+        raise ValueError('Invalid PostgreSQL graph job descriptor')
+    if run_id is not None and run_id != descriptor['run_id']:
+        raise ValueError('Graph job run_id cannot be changed')
+    search = SemanticStore(descriptor['run_id'], model=model, database_url=database_url,
+                           readonly=True, initialize=False)
+    try:
+        with search.db.transaction():
+            search.db.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
+            return _validate_graph(snapshot_path, job_dir, cases, model, search)
+    finally:
+        search.close()
+
+
+def _validate_graph(snapshot_path, job_dir, cases, model, search):
+    snapshot, file_hash = read_snapshot(Path(snapshot_path))
+    graph = store = master = search.db
     failures = Counter()
     details = []
     def fail(code, **context):
         failures[code] += 1
         if len(details) < DETAIL_LIMIT:
             details.append({'code': code, **context})
+    meta = {row['key']:row['value'] for row in graph.execute('SELECT key,value FROM meta')}
+    metric=meta.get('decision_metric','confidence')
+    if metric not in ('probability','confidence'):fail('invalid_decision_metric',metric=metric)
     try:
-        meta = dict(graph.execute('SELECT key,value FROM meta'))
-        metric=meta.get('decision_metric','confidence')
-        if metric not in ('probability','confidence'):fail('invalid_decision_metric',metric=metric)
+        resolution=float(meta.get('problem_resolution',0.05))
+        if not math.isfinite(resolution) or resolution<=0:raise ValueError('invalid resolution')
+    except (ValueError,TypeError):
+        fail('invalid_problem_resolution');resolution=0.05
+    if meta.get('snapshot_hash') != snapshot['snapshot_hash'] or meta.get('file_hash') != file_hash:
+        fail('snapshot_binding')
+    if meta.get('phase') != 'complete':fail('incomplete_graph_phase',phase=meta.get('phase'))
+    if meta.get('index_status') != 'verified':fail('unverified_retrieval_index',status=meta.get('index_status'))
+    papers = {p['paper_id']: p for p in snapshot['papers']}
+    if len(papers) != len(snapshot['papers']): fail('duplicate_snapshot_paper')
+    expected_sources = {}
+    expected_extractions = {}
+    expected_items = {}
+    expected_contributions = {}
+    approved = set()
+    review_metadata = snapshot.get('review_metadata', {})
+    policy = snapshot.get('config', {}).get('review_policy', 'legacy-paper')
+    for wrapper in snapshot['extractions']:
+        x = wrapper.get('extraction', wrapper.get('payload', wrapper))
+        pid = x['paper_id']; vid = x['version_id']
+        paper = papers.get(pid)
+        if not paper:
+            fail('missing_snapshot_paper', paper_id=pid)
+            continue
+        pin = paper.get('paper_version', paper)
+        source_pin = {k:paper.get(k) for k in ('paper_id','version_id','title','text')}
+        source_pin.update({k:pin.get(k) for k in ('version_label','source_url')})
+        if paper.get('source_hash') != canonical_hash(source_pin) or paper.get('version_id') != vid or x.get('paper_version') != {k:pin.get(k) for k in ('version_label','source_url')}:
+            fail('source_pin', paper_id=pid)
+        eid = 'extr:' + hashlib.sha256('|'.join((pid, vid, x.get('extractor_type','assistant_manual'), x.get('extractor_version','2026-10-31-v1'))).encode()).hexdigest()[:24]
+        if wrapper.get('extraction_id') and wrapper['extraction_id'] != eid: fail('extraction_id', paper_id=pid)
+        if eid in expected_sources: fail('duplicate_extraction', extraction_id=eid)
+        expected_sources[eid] = (pid,vid,paper['title'],pin.get('source_url'),pin.get('version_label'), digest({'payload':x,'status':x['status'],'source_scope':x['source_scope'],'title':paper['title'],'source_url':pin.get('source_url'),'version_label':pin.get('version_label')}))
+        expected_extractions[eid] = x
+        if x.get('status') != 'reviewed': fail('unreviewed_extraction', paper_id=pid)
+        metadata = review_metadata.get(pid, {})
+        review_items=metadata.get('items',[]) if isinstance(metadata,dict) else []
+        reviewed = {(r.get('field'),r.get('key')) for r in review_items if r.get('state') == 'approved'}
+        if policy == 'item-v1' and (not isinstance(review_items,list) or len({(r.get('field'),r.get('key')) for r in review_items})!=len(review_items)):
+            fail('invalid_review_metadata',paper_id=pid)
+        approved_hashes={(r.get('field'),r.get('key')):r.get('approved_payload_hash') for r in review_items if r.get('state')=='approved'}
+        actual = set()
+        for field,kind in FIELDS.items():
+            for item in x[field]:
+                key=(field,item['key']); actual.add(key)
+                if policy == 'item-v1':
+                    if key not in reviewed:fail('unapproved_snapshot_item',paper_id=pid,field=field,key=item['key'])
+                    elif approved_hashes.get(key)!=canonical_hash(item):fail('approved_payload_hash',paper_id=pid,field=field,key=item['key'])
+                identity=(eid,item['key'])
+                if identity in expected_items or identity in expected_contributions: fail('duplicate_item_key',paper_id=pid,key=item['key'])
+                if field == 'contributions':expected_contributions[identity] = item
+                else:expected_items[identity] = (kind,item)
+                approved.add((pid,field,item['key']))
+        if policy == 'item-v1':
+            for field,key in reviewed - actual:fail('approved_item_missing_from_snapshot',paper_id=pid,field=field,key=key)
+    # The job's private master must retain the exact source text and approved extraction.
+    master_papers={r['paper_id']:r for r in master.execute('SELECT paper_id,title FROM papers')}
+    master_versions={r['version_id']:r for r in master.execute('SELECT version_id,paper_id,version_label,source_url,abstract FROM paper_versions')}
+    master_extractions={r['extraction_id']:r for r in master.execute('SELECT extraction_id,paper_id,version_id,extractor_type,extractor_version,source_scope,status,payload_json FROM extraction_records')}
+    expected_paper_ids={x['paper_id'] for x in expected_extractions.values()}
+    for pid in expected_paper_ids:
+        paper=papers[pid]
+        row=master_papers.get(pid)
+        if not row or row['title']!=paper['title']:fail('master_paper',paper_id=pid)
+    for pid in master_papers.keys()-expected_paper_ids:fail('extra_master_paper',paper_id=pid)
+    for eid,x in expected_extractions.items():
+        pid=x['paper_id'];vid=x['version_id'];paper=papers[pid]
+        pin=paper.get('paper_version',paper)
+        version=master_versions.get(vid)
+        if not version or tuple(version[k] for k in ('paper_id','version_label','source_url','abstract'))!=(pid,pin.get('version_label'),pin.get('source_url'),paper['text']):
+            fail('master_paper_version',paper_id=pid,version_id=vid)
+        extraction=master_extractions.get(eid)
+        if not extraction or tuple(extraction[k] for k in ('paper_id','version_id','extractor_type','extractor_version','source_scope','status'))!=(pid,vid,x.get('extractor_type','assistant_manual'),x.get('extractor_version','2026-10-31-v1'),x['source_scope'],x['status']) or json.loads(extraction['payload_json'])!=x:
+            fail('master_extraction',extraction_id=eid)
+    expected_versions={x['version_id'] for x in expected_extractions.values()}
+    for vid in master_versions.keys()-expected_versions:fail('extra_master_version',version_id=vid)
+    for eid in master_extractions.keys()-expected_extractions.keys():fail('extra_master_extraction',extraction_id=eid)
+    sources = {r['extraction_id']:r for r in store.execute('SELECT * FROM sources')}
+    for eid,pin in expected_sources.items():
+        row=sources.get(eid)
+        if row is None:fail('missing_source',extraction_id=eid)
+        elif tuple(row[k] for k in ('paper_id','version_id','title','source_url','version_label','source_hash')) != pin:
+            fail('source_metadata',extraction_id=eid)
+    for eid in sources.keys() - expected_sources.keys():fail('extra_source',extraction_id=eid)
+    mentions = {r['mention_id']:r for r in store.execute('SELECT * FROM mentions')}
+    mention_keys = set()
+    for mid,row in mentions.items():
+        identity=(row['extraction_id'],row['item_key']); mention_keys.add(identity)
+        expected=expected_items.get(identity)
+        if not expected:
+            fail('extra_mention',mention_id=mid)
+            continue
+        kind,item=expected
+        field=next(k for k,v in KINDS.items() if v == kind)
+        expected_id='mention:'+digest([row['extraction_id'],field,item['key']])[:32]
+        roles=item.get('roles',[item['role']] if 'role' in item else [])
+        if (row['kind'] != kind or mid != expected_id or row['name'] != item['name'] or row['description'] != item['description'] or
+            json.loads(row['role_json']) != roles or row['version_or_subset'] != item.get('version_or_subset') or
+            json.loads(row['source_json']) != item or row['mention_hash'] != digest(item)):
+            fail('mention_payload',mention_id=mid)
+    for eid,key in expected_items.keys() - mention_keys:fail('missing_mention',extraction_id=eid,key=key)
+    contributions = {r['contribution_id']:r for r in store.execute('SELECT * FROM contributions')}
+    contribution_keys=set()
+    for cid,row in contributions.items():
+        identity=(row['extraction_id'],row['item_key']);contribution_keys.add(identity)
+        item=expected_contributions.get(identity)
+        if not item:fail('extra_contribution',contribution_id=cid);continue
+        if cid != 'contribution:'+digest([row['extraction_id'],item['key']])[:32] or row['description'] != item['description'] or json.loads(row['source_json']) != item:
+            fail('contribution_payload',contribution_id=cid)
+    for eid,key in expected_contributions.keys()-contribution_keys:fail('missing_contribution',extraction_id=eid,key=key)
+    entities={r['entity_id']:r for r in store.execute('SELECT * FROM entities')}
+    groups={r['group_id']:r for r in graph.execute('SELECT * FROM groups')}
+    for table, identity, expression in (
+        ('entity_fts','entity_id',"name || ' ' || description || ' ' || aliases"),
+        ('contribution_fts','contribution_id','description'),
+        ('research_area_fts','area_id',"name || ' ' || description"),
+    ):
+        for row in store.execute(f"SELECT {identity} FROM {table} WHERE search_vector IS DISTINCT FROM to_tsvector('simple', {expression})"):
+            fail('invalid_search_vector', table=table, item_id=row[identity])
+    for row in graph.execute('SELECT event_id,payload_json,delivered FROM graph_outbox'):
         try:
-            resolution=float(meta.get('problem_resolution',0.05))
-            if not math.isfinite(resolution) or resolution<=0:raise ValueError('invalid resolution')
+            payload = json.loads(row['payload_json'])
+            if (not isinstance(payload,dict) or payload.get('event_id') != row['event_id']
+                    or not isinstance(payload.get('nodes'),list) or not isinstance(payload.get('edges'),list)
+                    or row['delivered'] not in (0,1)):
+                raise ValueError('Invalid outbox payload')
         except (ValueError,TypeError):
-            fail('invalid_problem_resolution');resolution=0.05
-        if meta.get('snapshot_hash') != snapshot['snapshot_hash'] or meta.get('file_hash') != file_hash:
-            fail('snapshot_binding')
-        if meta.get('phase') != 'complete':fail('incomplete_graph_phase',phase=meta.get('phase'))
-        if meta.get('index_status') != 'verified':fail('unverified_retrieval_index',status=meta.get('index_status'))
-        papers = {p['paper_id']: p for p in snapshot['papers']}
-        if len(papers) != len(snapshot['papers']): fail('duplicate_snapshot_paper')
-        expected_sources = {}
-        expected_extractions = {}
-        expected_items = {}
-        expected_contributions = {}
-        approved = set()
-        review_metadata = snapshot.get('review_metadata', {})
-        policy = snapshot.get('config', {}).get('review_policy', 'legacy-paper')
-        for wrapper in snapshot['extractions']:
-            x = wrapper.get('extraction', wrapper.get('payload', wrapper))
-            pid = x['paper_id']; vid = x['version_id']
-            paper = papers.get(pid)
-            if not paper:
-                fail('missing_snapshot_paper', paper_id=pid)
-                continue
-            pin = paper.get('paper_version', paper)
-            source_pin = {k:paper.get(k) for k in ('paper_id','version_id','title','text')}
-            source_pin.update({k:pin.get(k) for k in ('version_label','source_url')})
-            if paper.get('source_hash') != canonical_hash(source_pin) or paper.get('version_id') != vid or x.get('paper_version') != {k:pin.get(k) for k in ('version_label','source_url')}:
-                fail('source_pin', paper_id=pid)
-            eid = 'extr:' + hashlib.sha256('|'.join((pid, vid, x.get('extractor_type','assistant_manual'), x.get('extractor_version','2026-10-31-v1'))).encode()).hexdigest()[:24]
-            if wrapper.get('extraction_id') and wrapper['extraction_id'] != eid: fail('extraction_id', paper_id=pid)
-            if eid in expected_sources: fail('duplicate_extraction', extraction_id=eid)
-            expected_sources[eid] = (pid,vid,paper['title'],pin.get('source_url'),pin.get('version_label'), digest({'payload':x,'status':x['status'],'source_scope':x['source_scope'],'title':paper['title'],'source_url':pin.get('source_url'),'version_label':pin.get('version_label')}))
-            expected_extractions[eid] = x
-            if x.get('status') != 'reviewed': fail('unreviewed_extraction', paper_id=pid)
-            metadata = review_metadata.get(pid, {})
-            review_items=metadata.get('items',[]) if isinstance(metadata,dict) else []
-            reviewed = {(r.get('field'),r.get('key')) for r in review_items if r.get('state') == 'approved'}
-            if policy == 'item-v1' and (not isinstance(review_items,list) or len({(r.get('field'),r.get('key')) for r in review_items})!=len(review_items)):
-                fail('invalid_review_metadata',paper_id=pid)
-            approved_hashes={(r.get('field'),r.get('key')):r.get('approved_payload_hash') for r in review_items if r.get('state')=='approved'}
-            actual = set()
-            for field,kind in FIELDS.items():
-                for item in x[field]:
-                    key=(field,item['key']); actual.add(key)
-                    if policy == 'item-v1':
-                        if key not in reviewed:fail('unapproved_snapshot_item',paper_id=pid,field=field,key=item['key'])
-                        elif approved_hashes.get(key)!=canonical_hash(item):fail('approved_payload_hash',paper_id=pid,field=field,key=item['key'])
-                    identity=(eid,item['key'])
-                    if identity in expected_items or identity in expected_contributions: fail('duplicate_item_key',paper_id=pid,key=item['key'])
-                    if field == 'contributions':expected_contributions[identity] = item
-                    else:expected_items[identity] = (kind,item)
-                    approved.add((pid,field,item['key']))
-            if policy == 'item-v1':
-                for field,key in reviewed - actual:fail('approved_item_missing_from_snapshot',paper_id=pid,field=field,key=key)
-        # The job's private master must retain the exact source text and approved extraction.
-        master_papers={r['paper_id']:r for r in master.execute('SELECT paper_id,title FROM papers')}
-        master_versions={r['version_id']:r for r in master.execute('SELECT version_id,paper_id,version_label,source_url,abstract FROM paper_versions')}
-        master_extractions={r['extraction_id']:r for r in master.execute('SELECT extraction_id,paper_id,version_id,extractor_type,extractor_version,source_scope,status,payload_json FROM extraction_records')}
-        expected_paper_ids={x['paper_id'] for x in expected_extractions.values()}
-        for pid in expected_paper_ids:
-            paper=papers[pid]
-            row=master_papers.get(pid)
-            if not row or row['title']!=paper['title']:fail('master_paper',paper_id=pid)
-        for pid in master_papers.keys()-expected_paper_ids:fail('extra_master_paper',paper_id=pid)
-        for eid,x in expected_extractions.items():
-            pid=x['paper_id'];vid=x['version_id'];paper=papers[pid]
-            pin=paper.get('paper_version',paper)
-            version=master_versions.get(vid)
-            if not version or tuple(version[k] for k in ('paper_id','version_label','source_url','abstract'))!=(pid,pin.get('version_label'),pin.get('source_url'),paper['text']):
-                fail('master_paper_version',paper_id=pid,version_id=vid)
-            extraction=master_extractions.get(eid)
-            if not extraction or tuple(extraction[k] for k in ('paper_id','version_id','extractor_type','extractor_version','source_scope','status'))!=(pid,vid,x.get('extractor_type','assistant_manual'),x.get('extractor_version','2026-10-31-v1'),x['source_scope'],x['status']) or json.loads(extraction['payload_json'])!=x:
-                fail('master_extraction',extraction_id=eid)
-        expected_versions={x['version_id'] for x in expected_extractions.values()}
-        for vid in master_versions.keys()-expected_versions:fail('extra_master_version',version_id=vid)
-        for eid in master_extractions.keys()-expected_extractions.keys():fail('extra_master_extraction',extraction_id=eid)
-        sources = {r['extraction_id']:r for r in store.execute('SELECT * FROM sources')}
-        for eid,pin in expected_sources.items():
-            row=sources.get(eid)
-            if row is None:fail('missing_source',extraction_id=eid)
-            elif tuple(row[k] for k in ('paper_id','version_id','title','source_url','version_label','source_hash')) != pin:
-                fail('source_metadata',extraction_id=eid)
-        for eid in sources.keys() - expected_sources.keys():fail('extra_source',extraction_id=eid)
-        mentions = {r['mention_id']:r for r in store.execute('SELECT * FROM mentions')}
-        mention_keys = set()
-        for mid,row in mentions.items():
-            identity=(row['extraction_id'],row['item_key']); mention_keys.add(identity)
-            expected=expected_items.get(identity)
-            if not expected:
-                fail('extra_mention',mention_id=mid)
-                continue
-            kind,item=expected
-            field=next(k for k,v in KINDS.items() if v == kind)
-            expected_id='mention:'+digest([row['extraction_id'],field,item['key']])[:32]
-            roles=item.get('roles',[item['role']] if 'role' in item else [])
-            if (row['kind'] != kind or mid != expected_id or row['name'] != item['name'] or row['description'] != item['description'] or
-                json.loads(row['role_json']) != roles or row['version_or_subset'] != item.get('version_or_subset') or
-                json.loads(row['source_json']) != item or row['mention_hash'] != digest(item)):
-                fail('mention_payload',mention_id=mid)
-        for eid,key in expected_items.keys() - mention_keys:fail('missing_mention',extraction_id=eid,key=key)
-        contributions = {r['contribution_id']:r for r in store.execute('SELECT * FROM contributions')}
-        contribution_keys=set()
-        for cid,row in contributions.items():
-            identity=(row['extraction_id'],row['item_key']);contribution_keys.add(identity)
-            item=expected_contributions.get(identity)
-            if not item:fail('extra_contribution',contribution_id=cid);continue
-            if cid != 'contribution:'+digest([row['extraction_id'],item['key']])[:32] or row['description'] != item['description'] or json.loads(row['source_json']) != item:
-                fail('contribution_payload',contribution_id=cid)
-        for eid,key in expected_contributions.keys()-contribution_keys:fail('missing_contribution',extraction_id=eid,key=key)
-        entities={r['entity_id']:r for r in store.execute('SELECT * FROM entities')}
-        groups={r['group_id']:r for r in graph.execute('SELECT * FROM groups')}
-        if meta.get('graph_policy') == 'domain-v1':
-            return _domain_validation(snapshot,job_dir,cases,model,graph,store,meta,mentions,
-                                      contributions,entities,groups,approved,sources,fail,failures,details)
-        accepted_members=defaultdict(set)
-        for gid,group in groups.items():
-            mids=json.loads(group['members_json'])
-            if len(mids)!=len(set(mids)) or not mids or gid != 'group:'+digest(mids)[:32]:fail('invalid_group_members',group_id=gid)
+            fail('invalid_graph_outbox', event_id=row['event_id'])
+    if meta.get('graph_policy') == 'domain-v1':
+        return _domain_validation(snapshot,job_dir,cases,model,graph,store,meta,mentions,
+                                  contributions,entities,groups,approved,sources,fail,failures,details,search)
+    accepted_members=defaultdict(set)
+    for gid,group in groups.items():
+        mids=json.loads(group['members_json'])
+        if len(mids)!=len(set(mids)) or not mids or gid != 'group:'+digest(mids)[:32]:fail('invalid_group_members',group_id=gid)
+        for mid in mids:
+            row=mentions.get(mid)
+            if not row:fail('dangling_group_member',group_id=gid,mention_id=mid);continue
+            if row['kind'] != group['kind']:fail('cross_kind_group',group_id=gid,mention_id=mid)
+            if group['review']=='accepted':accepted_members[mid].add(gid)
+            elif row['decision']!='pending' or row['entity_id'] is not None:fail('pending_group_resolved',group_id=gid,mention_id=mid)
+        if group['review']=='accepted':
+            expected_eid='entity:'+digest([group['kind'],mids])[:32]
+            entity=entities.get(expected_eid)
+            if not entity or entity['kind']!=group['kind'] or entity['name']!=group['name'] or entity['description']!=group['description']:
+                fail('accepted_group_entity',group_id=gid)
             for mid in mids:
                 row=mentions.get(mid)
-                if not row:fail('dangling_group_member',group_id=gid,mention_id=mid);continue
-                if row['kind'] != group['kind']:fail('cross_kind_group',group_id=gid,mention_id=mid)
-                if group['review']=='accepted':accepted_members[mid].add(gid)
-                elif row['decision']!='pending' or row['entity_id'] is not None:fail('pending_group_resolved',group_id=gid,mention_id=mid)
-            if group['review']=='accepted':
-                expected_eid='entity:'+digest([group['kind'],mids])[:32]
-                entity=entities.get(expected_eid)
-                if not entity or entity['kind']!=group['kind'] or entity['name']!=group['name'] or entity['description']!=group['description']:
-                    fail('accepted_group_entity',group_id=gid)
-                for mid in mids:
-                    row=mentions.get(mid)
-                    if row and (row['entity_id']!=expected_eid or row['decision']=='pending'):
-                        fail('accepted_group_assignment',group_id=gid,mention_id=mid)
-        group_member_counts=Counter(mid for group in groups.values() for mid in json.loads(group['members_json']))
-        if meta.get('phase') in ('grouped','complete'):
-            for mid in mentions:
-                if group_member_counts[mid]!=1:fail('group_membership_count',mention_id=mid,count=group_member_counts[mid])
-        for mid,row in mentions.items():
-            eid=row['entity_id'];entity=entities.get(eid) if eid else None
-            if eid and (not entity or entity['kind']!=row['kind']):fail('dangling_or_cross_kind_entity',mention_id=mid)
-            if (row['decision']=='pending') != (eid is None):fail('pending_assignment',mention_id=mid)
-            if eid and not accepted_members[mid]:fail('assignment_without_accepted_group',mention_id=mid)
-            if not eid and accepted_members[mid]:fail('accepted_member_pending',mention_id=mid)
-            if len(accepted_members[mid])>1:fail('multiple_accepted_groups',mention_id=mid)
-        assigned_entities={r['entity_id'] for r in mentions.values() if r['entity_id']}
-        for eid in entities.keys()-assigned_entities:fail('orphan_entity',entity_id=eid)
-        pending_pairs=0
-        for row in graph.execute('SELECT pair_id,kind,left_id,right_id,decision FROM candidates'):
-            left=mentions.get(row['left_id']);right=mentions.get(row['right_id'])
-            if not left or not right:fail('dangling_pair',pair_id=row['pair_id']);continue
-            if left['kind']!=row['kind'] or right['kind']!=row['kind']:fail('cross_kind_pair',pair_id=row['pair_id'])
-            le=left['entity_id'];re=right['entity_id']
-            if row['decision']=='different' and le and le==re:fail('different_pair_merged',pair_id=row['pair_id'])
-            if row['decision']=='same' and (not le or le!=re) and not (left['decision']=='pending' or right['decision']=='pending'):
-                fail('same_pair_split',pair_id=row['pair_id'])
-            if row['decision'] in ('pending','unjudged'):
-                pending_pairs+=1
-                if left['decision']!='pending' or right['decision']!='pending':fail('pending_pair_resolved',pair_id=row['pair_id'])
-        # FTS and exact alias directory are audited as stored, without issuing matching writes.
-        entity_fts={r['entity_id']:r for r in store.execute('SELECT entity_id,name,description,aliases FROM entity_fts')}
-        surfaces=defaultdict(set)
-        for r in store.execute('SELECT kind,normalized_name,entity_id FROM entity_surfaces'):
-            surfaces[r['entity_id']].add((r['kind'],r['normalized_name']))
-        names_by_entity=defaultdict(set)
-        for mention in mentions.values():
-            if mention['entity_id']:names_by_entity[mention['entity_id']].add(mention['name'])
-        for eid,row in entities.items():
-            aliases=json.loads(row['aliases_json']);fts=entity_fts.get(eid)
-            if not fts or (fts['name'],fts['description'],fts['aliases'])!=(row['name'],row['description'],' '.join(aliases)):
-                fail('entity_fts',entity_id=eid)
-            required={(row['kind'],' '.join(name.split()).casefold()) for name in [row['name'],*aliases]}
-            if not required.issubset(surfaces[eid]):fail('entity_surfaces',entity_id=eid)
-            if row['kind'] in ('Method','Benchmark'):
-                names=names_by_entity[eid]
-                if row['name_origin']!='source_authored' or row['name'] not in names or not names.issubset(set(aliases)|{row['name']}):
-                    fail('source_authored_name',entity_id=eid)
-        for r in store.execute('SELECT entity_id,count(*) n FROM entity_fts GROUP BY entity_id HAVING count(*)>1'):
-            fail('duplicate_entity_fts',entity_id=r['entity_id'],count=r['n'])
-        for eid in entity_fts.keys()-entities.keys():fail('extra_entity_fts',entity_id=eid)
-        for eid in surfaces.keys()-entities.keys():fail('extra_entity_surfaces',entity_id=eid)
-        cfts={r['contribution_id']:r['description'] for r in store.execute('SELECT contribution_id,description FROM contribution_fts')}
-        for cid,row in contributions.items():
-            if cfts.get(cid)!=row['description']:fail('contribution_fts',contribution_id=cid)
-        for r in store.execute('SELECT contribution_id,count(*) n FROM contribution_fts GROUP BY contribution_id HAVING count(*)>1'):
-            fail('duplicate_contribution_fts',contribution_id=r['contribution_id'],count=r['n'])
-        for cid in cfts.keys()-contributions.keys():fail('extra_contribution_fts',contribution_id=cid)
-        quality=_quality(cases,store,job_dir,model,mentions,contributions,fail) if cases is not None else {'status':'untested','reason':'no labeled cases'}
-        counts={'approved_items':len(approved),'sources':len(sources),'mentions':len(mentions),'contributions':len(contributions),
-                'entities':len(entities),'accepted_groups':sum(g['review']=='accepted' for g in groups.values()),
-                'pending_groups':sum(g['review']!='accepted' for g in groups.values()),'pending_pairs':pending_pairs,
-                'pending_mentions':sum(r['decision']=='pending' for r in mentions.values())}
-        return {'schema_version':'research-kg-graph-acceptance/1','snapshot_hash':snapshot['snapshot_hash'],
-                'structural':{'passed':not failures,'failure_counts':dict(sorted(failures.items())),'failure_total':sum(failures.values()),
-                              'details':details,'details_truncated':sum(failures.values())>len(details),'coverage':counts,
-                              'complete_resolution':counts['pending_pairs']==counts['pending_groups']==counts['pending_mentions']==0},
-                'quality':quality}
-    finally:
-        graph.close();store.close();master.close()
-
+                if row and (row['entity_id']!=expected_eid or row['decision']=='pending'):
+                    fail('accepted_group_assignment',group_id=gid,mention_id=mid)
+    group_member_counts=Counter(mid for group in groups.values() for mid in json.loads(group['members_json']))
+    if meta.get('phase') in ('grouped','complete'):
+        for mid in mentions:
+            if group_member_counts[mid]!=1:fail('group_membership_count',mention_id=mid,count=group_member_counts[mid])
+    for mid,row in mentions.items():
+        eid=row['entity_id'];entity=entities.get(eid) if eid else None
+        if eid and (not entity or entity['kind']!=row['kind']):fail('dangling_or_cross_kind_entity',mention_id=mid)
+        if (row['decision']=='pending') != (eid is None):fail('pending_assignment',mention_id=mid)
+        if eid and not accepted_members[mid]:fail('assignment_without_accepted_group',mention_id=mid)
+        if not eid and accepted_members[mid]:fail('accepted_member_pending',mention_id=mid)
+        if len(accepted_members[mid])>1:fail('multiple_accepted_groups',mention_id=mid)
+    assigned_entities={r['entity_id'] for r in mentions.values() if r['entity_id']}
+    for eid in entities.keys()-assigned_entities:fail('orphan_entity',entity_id=eid)
+    pending_pairs=0
+    for row in graph.execute('SELECT pair_id,kind,left_id,right_id,decision FROM candidates'):
+        left=mentions.get(row['left_id']);right=mentions.get(row['right_id'])
+        if not left or not right:fail('dangling_pair',pair_id=row['pair_id']);continue
+        if left['kind']!=row['kind'] or right['kind']!=row['kind']:fail('cross_kind_pair',pair_id=row['pair_id'])
+        le=left['entity_id'];re=right['entity_id']
+        if row['decision']=='different' and le and le==re:fail('different_pair_merged',pair_id=row['pair_id'])
+        if row['decision']=='same' and (not le or le!=re) and not (left['decision']=='pending' or right['decision']=='pending'):
+            fail('same_pair_split',pair_id=row['pair_id'])
+        if row['decision'] in ('pending','unjudged'):
+            pending_pairs+=1
+            if left['decision']!='pending' or right['decision']!='pending':fail('pending_pair_resolved',pair_id=row['pair_id'])
+    # FTS and exact alias directory are audited as stored, without issuing matching writes.
+    entity_fts={r['entity_id']:r for r in store.execute('SELECT entity_id,name,description,aliases FROM entity_fts')}
+    surfaces=defaultdict(set)
+    for r in store.execute('SELECT kind,normalized_name,entity_id FROM entity_surfaces'):
+        surfaces[r['entity_id']].add((r['kind'],r['normalized_name']))
+    names_by_entity=defaultdict(set)
+    for mention in mentions.values():
+        if mention['entity_id']:names_by_entity[mention['entity_id']].add(mention['name'])
+    for eid,row in entities.items():
+        aliases=json.loads(row['aliases_json']);fts=entity_fts.get(eid)
+        if not fts or (fts['name'],fts['description'],fts['aliases'])!=(row['name'],row['description'],' '.join(aliases)):
+            fail('entity_fts',entity_id=eid)
+        required={(row['kind'],' '.join(name.split()).casefold()) for name in [row['name'],*aliases]}
+        if not required.issubset(surfaces[eid]):fail('entity_surfaces',entity_id=eid)
+        if row['kind'] in ('Method','Benchmark'):
+            names=names_by_entity[eid]
+            if row['name_origin']!='source_authored' or row['name'] not in names or not names.issubset(set(aliases)|{row['name']}):
+                fail('source_authored_name',entity_id=eid)
+    for r in store.execute('SELECT entity_id,count(*) n FROM entity_fts GROUP BY entity_id HAVING count(*)>1'):
+        fail('duplicate_entity_fts',entity_id=r['entity_id'],count=r['n'])
+    for eid in entity_fts.keys()-entities.keys():fail('extra_entity_fts',entity_id=eid)
+    for eid in surfaces.keys()-entities.keys():fail('extra_entity_surfaces',entity_id=eid)
+    cfts={r['contribution_id']:r['description'] for r in store.execute('SELECT contribution_id,description FROM contribution_fts')}
+    for cid,row in contributions.items():
+        if cfts.get(cid)!=row['description']:fail('contribution_fts',contribution_id=cid)
+    for r in store.execute('SELECT contribution_id,count(*) n FROM contribution_fts GROUP BY contribution_id HAVING count(*)>1'):
+        fail('duplicate_contribution_fts',contribution_id=r['contribution_id'],count=r['n'])
+    for cid in cfts.keys()-contributions.keys():fail('extra_contribution_fts',contribution_id=cid)
+    quality=_quality(cases,store,job_dir,model,mentions,contributions,fail,search=search) if cases is not None else {'status':'untested','reason':'no labeled cases'}
+    counts={'approved_items':len(approved),'sources':len(sources),'mentions':len(mentions),'contributions':len(contributions),
+            'entities':len(entities),'accepted_groups':sum(g['review']=='accepted' for g in groups.values()),
+            'pending_groups':sum(g['review']!='accepted' for g in groups.values()),'pending_pairs':pending_pairs,
+            'pending_mentions':sum(r['decision']=='pending' for r in mentions.values())}
+    return {'schema_version':'research-kg-graph-acceptance/1','snapshot_hash':snapshot['snapshot_hash'],
+            'structural':{'passed':not failures,'failure_counts':dict(sorted(failures.items())),'failure_total':sum(failures.values()),
+                          'details':details,'details_truncated':sum(failures.values())>len(details),'coverage':counts,
+                          'complete_resolution':counts['pending_pairs']==counts['pending_groups']==counts['pending_mentions']==0},
+            'quality':quality}
 
 def _domain_validation(snapshot, job_dir, cases, model, graph, store, meta, mentions,
-                       contributions, entities, groups, approved, sources, fail, failures, details):
+                       contributions, entities, groups, approved, sources, fail, failures, details, search):
     """Audit the domain policy's immutable proposals and final retained relationships."""
     metric=meta.get('decision_metric','confidence')
     try:resolution=float(meta.get('problem_resolution',0.05))
@@ -319,7 +343,7 @@ def _domain_validation(snapshot, job_dir, cases, model, graph, store, meta, ment
             else:kept.append(mid)
         if group['kind']=='ResearchProblem':
             if len(mids)>1:
-                task=graph.execute('SELECT status,result_json FROM tasks WHERE group_id=?',(gid,)).fetchone()
+                task=graph.execute('SELECT status,result_json FROM tasks WHERE group_id=%s',(gid,)).fetchone()
                 try:result=json.loads(task['result_json']) if task and task['status']=='done' else None
                 except (ValueError,TypeError):result=None
                 if not isinstance(result,dict) or result.get('name')!=group['name'] or result.get('description')!=group['description'] or result.get('group_id',gid)!=gid:
@@ -407,11 +431,11 @@ def _domain_validation(snapshot, job_dir, cases, model, graph, store, meta, ment
     for aid in area_fts.keys()-areas.keys():fail('extra_research_area_fts',area_id=aid)
     # The proposal is an artifact of the actual clustering run; verify it also
     # matches the frozen vectors, so replacing the artifact cannot mask a wrong partition.
-    proposal_path=job_dir/'problem-proposal.json'
     try:
-        proposal=json.loads(proposal_path.read_text(encoding='utf-8'))
+        proposal=json.loads(meta.get('problem_proposal','null'))
+        if not isinstance(proposal,dict):raise ValueError('Missing PostgreSQL problem proposal')
         vectors={r['item_key']:r['vector'] for r in snapshot['vectors'] if r['kind']=='ResearchProblem'}
-        by_paper={(r['paper_id'],r['item_key']):r['mention_id'] for r in store.execute('SELECT m.mention_id,m.item_key,s.paper_id FROM mentions m JOIN sources s ON s.extraction_id=m.extraction_id WHERE m.kind=?',('ResearchProblem',))}
+        by_paper={(r['paper_id'],r['item_key']):r['mention_id'] for r in store.execute('SELECT m.mention_id,m.item_key,s.paper_id FROM mentions m JOIN sources s ON s.extraction_id=m.extraction_id WHERE m.kind=%s',('ResearchProblem',))}
         rp_vectors={mid:vectors[pid+'::'+key] for (pid,key),mid in by_paper.items()}
         from .problem_clustering import cluster_problem_vectors
         recalculated=cluster_problem_vectors(rp_vectors,k=int(meta['k']),resolution=resolution)
@@ -438,7 +462,7 @@ def _domain_validation(snapshot, job_dir, cases, model, graph, store, meta, ment
     for mid in sorted(parent):components[root(mid)].append(mid)
     actual_mb={tuple(parsed_groups[gid]) for gid,g in groups.items() if g['kind'] in ('Method','Benchmark') and gid in parsed_groups}
     if actual_mb!={tuple(mids) for mids in components.values()}:fail('identity_components_mismatch')
-    quality=_quality(cases,store,job_dir,model,mentions,contributions,fail,domain=True) if cases is not None else {'status':'untested','reason':'no labeled cases'}
+    quality=_quality(cases,store,job_dir,model,mentions,contributions,fail,domain=True,search=search) if cases is not None else {'status':'untested','reason':'no labeled cases'}
     counts={'approved_items':len(approved),'sources':len(sources),'mentions':len(mentions),'contributions':len(contributions),
             'entities':len(entities),'research_areas':len(areas),'area_memberships':sum(memberships.values()),
             'excluded_memberships':excluded_count,'member_reviews':len(reviews),'accepted_groups':sum(g['review']=='accepted' for g in groups.values()),
@@ -451,7 +475,7 @@ def _domain_validation(snapshot, job_dir, cases, model, graph, store, meta, ment
                           'complete_resolution':counts['pending_pairs']==counts['pending_groups']==counts['pending_mentions']==0},'quality':quality}
 
 
-def _quality(cases, source_db, job_dir, model, mentions, contributions, fail, *, domain=False):
+def _quality(cases, source_db, job_dir, model, mentions, contributions, fail, *, domain=False, search):
     if not isinstance(cases,dict):raise ValueError('Cases must be a JSON object')
     queries=cases.get('queries',[]);pairs=cases.get('identity_pairs',[])
     if not isinstance(queries,list) or not isinstance(pairs,list):raise ValueError('Invalid case arrays')
@@ -490,23 +514,15 @@ def _quality(cases, source_db, job_dir, model, mentions, contributions, fail, *,
     if any(q.get('id') in seen for q in queries) or len({q.get('id') for q in queries})!=len(queries):raise ValueError('Duplicate case ID')
     hits=[];reciprocals=[];area_hits=[];area_reciprocals=[]
     if labeled:
-        # Search embeddings may populate cache; only a private copy is opened by SemanticStore.
-        with tempfile.TemporaryDirectory() as tmp:
-            path=Path(tmp)/'semantic.sqlite'
-            dest=sqlite3.connect(path)
-            source_db.backup(dest);dest.close()
-            search=SemanticStore(path,model=model)
-            try:
-                for case in labeled:
-                    expected=set(case['expected_paper_ids'])
-                    if case['kind'] not in (*KINDS.values(),'Contribution',*(['ResearchArea'] if domain else [])):raise ValueError('Invalid query kind')
-                    result=search.search(case['query'],kind=case['kind'],limit=5,expand_limit=20)['results']
-                    paper_sets=[{p[0] for p in search.db.execute('SELECT DISTINCT s.paper_id FROM research_area_members am JOIN mentions m ON am.mention_id=m.mention_id JOIN sources s ON m.extraction_id=s.extraction_id WHERE am.area_id=?',(r['entity_id'],))} if domain and r.get('kind')=='ResearchArea' else {p[0] for p in search.db.execute('SELECT DISTINCT s.paper_id FROM mentions m JOIN sources s ON m.extraction_id=s.extraction_id WHERE m.entity_id=?',(r['entity_id'],))} if 'entity_id' in r else {r['paper_id']} for r in result]
-                    ranks=[i for i,pids in enumerate(paper_sets,1) if expected & pids]
-                    rank=min(ranks) if ranks else None
-                    target_hits,target_reciprocals=(area_hits,area_reciprocals) if domain and case['kind']=='ResearchArea' else (hits,reciprocals)
-                    target_hits.append(int(rank is not None));target_reciprocals.append(1/rank if rank else 0)
-            finally:search.close()
+        for case in labeled:
+            expected=set(case['expected_paper_ids'])
+            if case['kind'] not in (*KINDS.values(),'Contribution',*(['ResearchArea'] if domain else [])):raise ValueError('Invalid query kind')
+            result=search.search(case['query'],kind=case['kind'],limit=5,expand_limit=20)['results']
+            paper_sets=[{p['paper_id'] for p in search.db.execute('SELECT DISTINCT s.paper_id FROM research_area_members am JOIN mentions m ON am.mention_id=m.mention_id JOIN sources s ON m.extraction_id=s.extraction_id WHERE am.area_id=%s',(r['entity_id'],))} if domain and r.get('kind')=='ResearchArea' else {p['paper_id'] for p in search.db.execute('SELECT DISTINCT s.paper_id FROM mentions m JOIN sources s ON m.extraction_id=s.extraction_id WHERE m.entity_id=%s',(r['entity_id'],))} if 'entity_id' in r else {r['paper_id']} for r in result]
+            ranks=[i for i,pids in enumerate(paper_sets,1) if expected & pids]
+            rank=min(ranks) if ranks else None
+            target_hits,target_reciprocals=(area_hits,area_reciprocals) if domain and case['kind']=='ResearchArea' else (hits,reciprocals)
+            target_hits.append(int(rank is not None));target_reciprocals.append(1/rank if rank else 0)
     return {'status':'evaluated' if labeled or resolved or wrong or pending else 'untested','query_cases':len(queries) if not domain else len(queries)-sum(q.get('kind')=='ResearchArea' for q in queries),
             'labeled_positive_queries':len(hits) if domain else len(labeled),'hit_at_5':sum(hits)/len(hits) if hits else None,
             'mrr':sum(reciprocals)/len(reciprocals) if reciprocals else None,
