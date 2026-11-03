@@ -39,7 +39,7 @@ def _files(root: Path) -> dict[str, dict]:
     if any(p.is_symlink() for p in root.rglob('*')):
         raise ValueError('Bundle contains a symbolic link')
     return {p.relative_to(root).as_posix(): {'sha256': _sha(p), 'bytes': p.stat().st_size}
-            for p in sorted(root.rglob('*')) if p.is_file() and p.name != 'manifest.json'}
+            for p in sorted(root.rglob('*')) if p.is_file() and p != root / 'manifest.json'}
 
 
 def _safe_index(directory: Path, *, kind: str, run_id: str, namespace: str, snapshot_hash: str) -> dict:
@@ -111,9 +111,11 @@ def _neo_driver():
 
 def _graph_export(directory: Path, namespace: str) -> dict:
     directory.mkdir()
-    counts = Counter()
     with _neo_driver() as driver, driver.session(database=os.getenv('NEO4J_DATABASE', 'neo4j')) as session:
         def read(tx):
+            # execute_read may retry this callback. Each attempt overwrites both
+            # streams and owns its own counts; only the successful attempt wins.
+            counts = Counter()
             with (directory / 'nodes.jsonl').open('wb') as out:
                 rows = tx.run('MATCH (n:KGNode {run_id:$ns}) RETURN n.node_id AS id, labels(n) AS labels, properties(n) AS properties ORDER BY id', ns=namespace)
                 for record in rows:
@@ -134,7 +136,8 @@ def _graph_export(directory: Path, namespace: str) -> dict:
                         raise ValueError('Unexpected graph relation')
                     out.write(_json(dict(record)))
                     counts['edges'] += 1
-        session.execute_read(read)
+            return counts
+        counts = session.execute_read(read)
     return {'node_counts': {k: counts[k] for k in sorted(LABELS)}, 'edge_count': counts['edges'],
             'nodes_sha256': _sha(directory / 'nodes.jsonl'), 'edges_sha256': _sha(directory / 'edges.jsonl'),
             'excluded': 'KGEvent audit nodes; PostgreSQL graph_outbox remains in the native backup'}
