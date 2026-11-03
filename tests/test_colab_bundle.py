@@ -156,8 +156,87 @@ def test_colab_meta_and_official_mcp_contract():
     assert "'apoc.meta.schema' in procedures" in document
     assert "'neo4j-mcp-server==1.6.1', 'mcp>=1.30,<2'" in document
     assert "'neo4j_get_schema', 'neo4j_read_cypher'" in document
+    assert "tools.call('neo4j_get_schema', {}, deadline=time.monotonic() + 30)" in document
+    assert "'params': {'ns': manifest['graph_namespace']}}, deadline=time.monotonic() + 30)" in document
     assert "'NEO4J_MCP_READ_ONLY'] = 'true'" in document
     assert "'NEO4J_MCP_TOOLS'] = 'get-schema,read-cypher'" in document
-    assert '/content/kg-builder[neo4j,retrieval,voyage]' in document
-    assert "os.environ['KG_GRAPH_DATABASE_URL'] = make_conninfo(" in document
-    assert "verify_source(manifest['run_id'], KG_BUNDLE / 'dense')" in document
+    assert "'--no-deps', '-e', '/content/kg-builder'" in document
+    assert 'postgresql-16' not in document.lower()
+    assert 'restore-postgres' not in document
+    assert 'verify_source(' not in document
+    assert "manifest['format'] == 'kg-colab-query-bundle/2'" in document
+
+
+def _query_fixture(root: Path):
+    root.mkdir()
+    ids = {kind: f'{kind}:one' for kind in bundle.KINDS}
+    for name, counts_key, format_id in (('bm25', 'counts', 'kg-bm25/1'),
+                                        ('dense', 'kind_counts', 'kg-persistent-dense/1')):
+        directory = root / name
+        directory.mkdir()
+        meta = {'format': format_id, 'run_id': 'run-1', 'graph_namespace': 'graph:one',
+                'snapshot_hash': 'hash-1', counts_key: {kind: 1 for kind in bundle.KINDS}}
+        if name == 'bm25':
+            for kind, node_id in ids.items():
+                path = directory / kind
+                path.mkdir()
+                (path / 'records.jsonl').write_bytes(bundle._json({'node_id': node_id, 'text': f'text {kind}', 'name': kind}))
+        else:
+            records = directory / 'records.json'
+            records.write_bytes(bundle._json([{'kind': kind, 'node_id': node_id, 'text_hash': 'hash'} for kind, node_id in ids.items()]))
+            hnsw = directory / 'hnsw'
+            hnsw.mkdir()
+            (hnsw / 'mapping.json').write_bytes(bundle._json([{'id': f'{kind}\x00{node_id}', 'label': i} for i, (kind, node_id) in enumerate(ids.items())]))
+            (hnsw / 'index.bin').write_bytes(b'index')
+            (hnsw / 'vectors.npy').write_bytes(b'vectors')
+            (hnsw / 'manifest.json').write_bytes(bundle._json({
+                'count': len(ids),
+                'index_sha256': bundle._sha(hnsw / 'index.bin'),
+                'mapping_sha256': bundle._sha(hnsw / 'mapping.json'),
+                'vectors_sha256': bundle._sha(hnsw / 'vectors.npy')}))
+            meta.update(model_id='document-model', query_model_id='query-model',
+                        source_fingerprint='source-hash', records_sha256=bundle._sha(records), count=len(ids),
+                        hnsw_manifest_sha256=bundle._sha(hnsw / 'manifest.json'))
+        (directory / 'manifest.json').write_bytes(bundle._json(meta))
+    graph = root / 'neo4j'
+    graph.mkdir()
+    (graph / 'nodes.jsonl').write_bytes(b''.join(bundle._json({'id': node_id, 'labels': [kind],
+        'properties': {'node_id': node_id, 'run_id': 'graph:one'}}) for kind, node_id in ids.items()))
+    (graph / 'edges.jsonl').write_bytes(b'')
+    (root / 'postgres.dump').write_bytes(b'legacy')
+    graph_meta = {'node_counts': {kind: 1 for kind in ids}, 'edge_count': 0,
+                  'nodes_sha256': bundle._sha(graph / 'nodes.jsonl'),
+                  'edges_sha256': bundle._sha(graph / 'edges.jsonl')}
+    old = {'format': bundle.FORMAT, 'run_id': 'run-1', 'graph_namespace': 'graph:one',
+           'snapshot_hash': 'hash-1', 'graph': graph_meta, 'files': bundle._files(root)}
+    (root / 'manifest.json').write_bytes(bundle._json(old))
+
+
+def test_repack_query_bundle_omits_pg_and_checks_membership(tmp_path):
+    source = tmp_path / 'native'
+    _query_fixture(source)
+    target = tmp_path / 'query'
+    result = bundle.repack_query_bundle(source, target)
+    assert result['format'] == bundle.QUERY_FORMAT
+    assert 'postgres.dump' not in result['files']
+    assert not (target / 'postgres.dump').exists()
+    assert (source / 'postgres.dump').exists()
+    extracted = tmp_path / 'extracted'
+    bundle.extract_zip(target.with_suffix('.zip'), extracted)
+    assert bundle.verify_bundle(extracted)['source_fingerprint'] == 'source-hash'
+    record_path = extracted / 'bm25/Paper/records.jsonl'
+    record_path.write_bytes(bundle._json({'node_id': 'different', 'text': 'text Paper'}))
+    manifest = json.loads((extracted / 'manifest.json').read_text())
+    manifest['files']['bm25/Paper/records.jsonl'] = {'bytes': record_path.stat().st_size, 'sha256': bundle._sha(record_path)}
+    (extracted / 'manifest.json').write_bytes(bundle._json(manifest))
+    with pytest.raises(ValueError, match='membership differs'):
+        bundle.verify_bundle(extracted)
+
+
+def test_graph_fingerprint_ignores_legacy_description_but_not_data():
+    graph = {'node_counts': {'Paper': 1}, 'edge_count': 0,
+             'nodes_sha256': 'nodes', 'edges_sha256': 'edges',
+             'excluded': 'KGEvent audit nodes'}
+    legacy = {**graph, 'excluded': 'KGEvent audit nodes; PostgreSQL graph_outbox remains in the native backup'}
+    assert bundle._same_graph_fingerprint(graph, legacy)
+    assert not bundle._same_graph_fingerprint(graph, {**legacy, 'nodes_sha256': 'different'})

@@ -8,7 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from kg_builder.colab_bundle import (export_bundle, extract_zip, restore_neo4j,
+from kg_builder.colab_bundle import (export_bundle, export_query_bundle, repack_query_bundle, extract_zip, restore_neo4j,
                                       restore_postgres, verify_bundle)
 
 
@@ -22,6 +22,14 @@ def main(argv=None):
     export.add_argument('--dense-dir', required=True)
     export.add_argument('--pg-dump', default='pg_dump')
     export.add_argument('--pg-restore', default='pg_restore')
+    query = commands.add_parser('export-query', help='Export published Neo4j and existing indexes without PostgreSQL')
+    query.add_argument('--run-id', required=True)
+    query.add_argument('--target', required=True)
+    query.add_argument('--bm25-dir', required=True)
+    query.add_argument('--dense-dir', required=True)
+    repack = commands.add_parser('repack-query', help='Convert a verified native v1 directory without rebuilding data')
+    repack.add_argument('source')
+    repack.add_argument('target')
     verify = commands.add_parser('verify')
     verify.add_argument('directory')
     extract = commands.add_parser('extract')
@@ -37,6 +45,10 @@ def main(argv=None):
     if args.command == 'export':
         result = export_bundle(args.run_id, args.target, args.bm25_dir, args.dense_dir,
                                pg_dump=args.pg_dump, pg_restore=args.pg_restore)
+    elif args.command == 'export-query':
+        result = export_query_bundle(args.run_id, args.target, args.bm25_dir, args.dense_dir)
+    elif args.command == 'repack-query':
+        result = repack_query_bundle(args.source, args.target)
     elif args.command == 'verify':
         result = verify_bundle(args.directory)
     elif args.command == 'extract':

@@ -1,4 +1,4 @@
-"""Portable native PostgreSQL backup and published Neo4j graph for Colab.
+"""Portable published graph and search indexes for Colab.
 
 All connection secrets come from the process environment.  The bundle contains
 database data and prebuilt indexes, never database credentials or model keys.
@@ -20,6 +20,7 @@ import zipfile
 from .neo4j_store import LABELS, RELATIONS
 
 FORMAT = 'kg-colab-native-bundle/1'
+QUERY_FORMAT = 'kg-colab-query-bundle/2'
 KINDS = ('Paper', 'ResearchProblem', 'Method', 'Benchmark', 'Contribution', 'ResearchArea')
 
 
@@ -140,7 +141,7 @@ def _graph_export(directory: Path, namespace: str) -> dict:
         counts = session.execute_read(read)
     return {'node_counts': {k: counts[k] for k in sorted(LABELS)}, 'edge_count': counts['edges'],
             'nodes_sha256': _sha(directory / 'nodes.jsonl'), 'edges_sha256': _sha(directory / 'edges.jsonl'),
-            'excluded': 'KGEvent audit nodes; PostgreSQL graph_outbox remains in the native backup'}
+            'excluded': 'KGEvent audit nodes'}
 
 
 def export_bundle(run_id: str, target: str | Path, bm25_dir: str | Path, dense_dir: str | Path,
@@ -197,7 +198,7 @@ def export_bundle(run_id: str, target: str | Path, bm25_dir: str | Path, dense_d
 def verify_bundle(root: str | Path) -> dict:
     root = Path(root)
     manifest = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
-    if manifest.get('format') != FORMAT or not manifest.get('files'):
+    if manifest.get('format') not in (FORMAT, QUERY_FORMAT) or not manifest.get('files'):
         raise ValueError('Unsupported or empty bundle')
     if set(_files(root)) != set(manifest['files']):
         raise ValueError('Bundle files differ from manifest')
@@ -214,7 +215,145 @@ def verify_bundle(root: str | Path) -> dict:
     graph = manifest['graph']
     if (_sha(root / 'neo4j/nodes.jsonl'), _sha(root / 'neo4j/edges.jsonl')) != (graph['nodes_sha256'], graph['edges_sha256']):
         raise ValueError('Graph fingerprint differs')
+    if manifest['format'] == QUERY_FORMAT:
+        if 'postgres.dump' in manifest['files'] or (root / 'postgres.dump').exists():
+            raise ValueError('Query bundle contains PostgreSQL backup')
+        _verify_query_membership(root, manifest)
     return manifest
+
+
+def _verify_query_membership(root: Path, manifest: dict) -> None:
+    """Full package check; query-time loaders still use their own local indexes."""
+    bm25 = json.loads((root / 'bm25/manifest.json').read_text(encoding='utf-8'))
+    dense = json.loads((root / 'dense/manifest.json').read_text(encoding='utf-8'))
+    if bm25['counts'] != dense['kind_counts'] or bm25['counts'] != manifest['bm25_counts'] or dense['kind_counts'] != manifest['dense_counts']:
+        raise ValueError('Search index counts differ')
+    if dense.get('model_id') != manifest.get('dense_model_id') or dense.get('query_model_id') != manifest.get('dense_query_model_id'):
+        raise ValueError('Dense model identity differs')
+    if not dense.get('source_fingerprint') or dense['source_fingerprint'] != manifest.get('source_fingerprint') or dense.get('records_sha256') != _sha(root / 'dense/records.json'):
+        raise ValueError('Dense source fingerprint or records checksum missing')
+    hnsw = json.loads((root / 'dense/hnsw/manifest.json').read_text(encoding='utf-8'))
+    if dense.get('hnsw_manifest_sha256') != _sha(root / 'dense/hnsw/manifest.json'):
+        raise ValueError('HNSW manifest checksum differs')
+    for key, filename in (('index_sha256', 'index.bin'), ('mapping_sha256', 'mapping.json'), ('vectors_sha256', 'vectors.npy')):
+        if hnsw.get(key) != _sha(root / 'dense/hnsw' / filename):
+            raise ValueError(f'HNSW {filename} checksum differs')
+
+    graph_ids = {kind: set() for kind in KINDS}
+    graph_counts = Counter()
+    with (root / 'neo4j/nodes.jsonl').open(encoding='utf-8') as stream:
+        for line in stream:
+            node = json.loads(line)
+            labels = node['labels']
+            if len(labels) != 1 or labels[0] not in LABELS or node['properties'].get('node_id') != node['id'] or node['properties'].get('run_id') != manifest['graph_namespace']:
+                raise ValueError('Graph node identity differs')
+            kind = labels[0]
+            graph_counts[kind] += 1
+            if kind in graph_ids:
+                if node['id'] in graph_ids[kind]:
+                    raise ValueError('Duplicate graph node ID')
+                graph_ids[kind].add(node['id'])
+    if dict(graph_counts) != {k: v for k, v in manifest['graph']['node_counts'].items() if v}:
+        raise ValueError('Graph node counts differ')
+    dense_ids = {kind: set() for kind in KINDS}
+    for row in json.loads((root / 'dense/records.json').read_text(encoding='utf-8')):
+        kind, node_id = row['kind'], row['node_id']
+        if kind not in dense_ids or not row.get('text_hash') or node_id in dense_ids[kind]:
+            raise ValueError('Dense record identity or text hash differs')
+        dense_ids[kind].add(node_id)
+    mapping_ids = {kind: set() for kind in KINDS}
+    mapping_rows = json.loads((root / 'dense/hnsw/mapping.json').read_text(encoding='utf-8'))
+    if hnsw.get('count') != len(mapping_rows) or dense.get('count') != len(mapping_rows):
+        raise ValueError('Dense/HNSW mapping count differs')
+    for row in mapping_rows:
+        kind, separator, node_id = row['id'].partition('\x00')
+        if not separator or kind not in mapping_ids or node_id in mapping_ids[kind]:
+            raise ValueError('HNSW mapping identity differs')
+        mapping_ids[kind].add(node_id)
+    for kind in KINDS:
+        records_path = root / 'bm25' / kind / 'records.jsonl'
+        if not records_path.is_file():
+            raise ValueError(f'BM25 text records missing: {kind}')
+        bm25_ids = set()
+        with records_path.open(encoding='utf-8') as stream:
+            for line in stream:
+                row = json.loads(line)
+                node_id = row.get('node_id')
+                if not isinstance(row.get('text'), str) or not row['text'].strip() or not node_id or node_id in bm25_ids:
+                    raise ValueError(f'BM25 text or ID missing/duplicate: {kind}')
+                bm25_ids.add(node_id)
+        if bm25_ids != graph_ids[kind] or bm25_ids != dense_ids[kind] or bm25_ids != mapping_ids[kind] or len(bm25_ids) != bm25['counts'][kind]:
+            raise ValueError(f'Graph/BM25/dense/HNSW ID membership differs: {kind}')
+
+
+def _publish_query_bundle(target: Path, source: Path, identity: dict, graph: dict, bm25: dict, dense: dict) -> dict:
+    if target.exists() or target.with_suffix('.zip').exists():
+        raise FileExistsError('Bundle target or ZIP already exists')
+    target.parent.mkdir(parents=True, exist_ok=True)
+    staging = target.parent / ('.' + target.name + '-' + uuid.uuid4().hex + '.tmp')
+    staging.mkdir()
+    try:
+        for name in ('neo4j', 'bm25', 'dense'):
+            shutil.copytree(source / name, staging / name)
+        manifest = {'format': QUERY_FORMAT, **identity, 'graph': graph,
+                    'bm25_counts': bm25['counts'], 'dense_counts': dense['kind_counts'],
+                    'dense_model_id': dense['model_id'], 'dense_query_model_id': dense.get('query_model_id'),
+                    'source_fingerprint': dense['source_fingerprint'], 'files': _files(staging)}
+        (staging / 'manifest.json').write_bytes(_json(manifest))
+        verify_bundle(staging)
+        staging.rename(target)
+        zip_temp = target.parent / ('.' + target.name + '-' + uuid.uuid4().hex + '.zip.tmp')
+        try:
+            with zipfile.ZipFile(zip_temp, 'w', compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
+                for relative in sorted(manifest['files']):
+                    archive.write(target / relative, relative)
+                archive.write(target / 'manifest.json', 'manifest.json')
+            zip_temp.rename(target.with_suffix('.zip'))
+        finally:
+            zip_temp.unlink(missing_ok=True)
+        return {**manifest, 'archive': {'path': str(target.with_suffix('.zip')),
+                                        'bytes': target.with_suffix('.zip').stat().st_size,
+                                        'sha256': _sha(target.with_suffix('.zip'))}}
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+
+
+def repack_query_bundle(source: str | Path, target: str | Path) -> dict:
+    """Repackage a verified native bundle without rebuilding graph or embeddings."""
+    source = Path(source).absolute()
+    target = Path(target).absolute()
+    if target.exists() or target.with_suffix('.zip').exists():
+        raise FileExistsError('Bundle target or ZIP already exists')
+    old = verify_bundle(source)
+    if old['format'] != FORMAT:
+        raise ValueError('Repack requires a native v1 bundle')
+    bm25 = _safe_index(source / 'bm25', kind='bm25', run_id=old['run_id'], namespace=old['graph_namespace'], snapshot_hash=old['snapshot_hash'])
+    dense = _safe_index(source / 'dense', kind='dense', run_id=old['run_id'], namespace=old['graph_namespace'], snapshot_hash=old['snapshot_hash'])
+    identity = {key: old[key] for key in ('run_id', 'graph_namespace', 'snapshot_hash')}
+    graph = {**old['graph'], 'excluded': 'KGEvent audit nodes'}
+    return _publish_query_bundle(target, source, identity, graph, bm25, dense)
+
+
+def export_query_bundle(run_id: str, target: str | Path, bm25_dir: str | Path, dense_dir: str | Path) -> dict:
+    """Export live published Neo4j plus prebuilt indexes, with no PostgreSQL access."""
+    target = Path(target).absolute()
+    if target.exists() or target.with_suffix('.zip').exists():
+        raise FileExistsError('Bundle target or ZIP already exists')
+    bm25 = json.loads((Path(bm25_dir) / 'manifest.json').read_text(encoding='utf-8'))
+    identity = {key: bm25[key] for key in ('run_id', 'graph_namespace', 'snapshot_hash')}
+    if identity['run_id'] != run_id:
+        raise ValueError('BM25 run ID differs')
+    bm25 = _safe_index(Path(bm25_dir), kind='bm25', **{'run_id': run_id, 'namespace': identity['graph_namespace'], 'snapshot_hash': identity['snapshot_hash']})
+    dense = _safe_index(Path(dense_dir), kind='dense', run_id=run_id, namespace=identity['graph_namespace'], snapshot_hash=identity['snapshot_hash'])
+    with tempfile.TemporaryDirectory(prefix='kg-query-export-') as temp:
+        source = Path(temp)
+        graph = _graph_export(source / 'neo4j', identity['graph_namespace'])
+        # The publisher owns the graph; membership validation below catches a
+        # stale or mixed index even when six-kind counts happen to agree.
+        shutil.copytree(bm25_dir, source / 'bm25')
+        shutil.copytree(dense_dir, source / 'dense')
+        return _publish_query_bundle(target, source, identity, graph, bm25, dense)
 
 
 def extract_zip(archive_path: str | Path, target: str | Path) -> dict:
@@ -237,7 +376,8 @@ def extract_zip(archive_path: str | Path, target: str | Path) -> dict:
 
 def restore_postgres(root: str | Path, *, pg_restore: str = 'pg_restore') -> None:
     """Restore into a separately created empty database named by PGDATABASE."""
-    verify_bundle(root)
+    if verify_bundle(root)['format'] != FORMAT:
+        raise ValueError('PostgreSQL restore requires a native v1 bundle')
     env = _pg_env(source=False)
     import psycopg
     with psycopg.connect(host=env['PGHOST'], port=env['PGPORT'], dbname=env['PGDATABASE'],
@@ -284,9 +424,15 @@ def restore_neo4j(root: str | Path, *, batch_size: int = 500) -> dict:
             raise ValueError('Restored graph counts differ')
     with tempfile.TemporaryDirectory(prefix='kg-restore-fingerprint-') as temp:
         observed = _graph_export(Path(temp) / 'neo4j', manifest['graph_namespace'])
-        if observed != manifest['graph']:
+        if not _same_graph_fingerprint(observed, manifest['graph']):
             raise ValueError('Restored graph fingerprint differs')
     return {'node_counts': counts, 'edge_count': edge_count}
+
+
+def _same_graph_fingerprint(observed: dict, expected: dict) -> bool:
+    """Compare graph data; descriptive exclusion notes can differ by format."""
+    keys = ('node_counts', 'edge_count', 'nodes_sha256', 'edges_sha256')
+    return all(observed.get(key) == expected.get(key) for key in keys)
 
 
 def _restore_group(session, kind: str, items: list[dict], filename: str, namespace: str) -> None:

@@ -9,7 +9,6 @@ import uuid
 import bm25s
 from bm25s.utils.corpus import JsonlCorpus
 
-from .postgres_graph import GraphStore
 
 TYPES = ('Paper', 'ResearchProblem', 'Method', 'Benchmark', 'Contribution', 'ResearchArea')
 FORMAT = 'kg-bm25/1'
@@ -46,6 +45,7 @@ def _rows(db):
 
 def build(run_id: str, index_dir: str | Path, *, database_url: str | None = None) -> dict:
     """Publish a new index directory; never replace an existing target."""
+    from .postgres_graph import GraphStore
     target=Path(index_dir).absolute()
     if target.exists():raise FileExistsError(target)
     target.parent.mkdir(parents=True,exist_ok=True)
