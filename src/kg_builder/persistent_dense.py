@@ -33,6 +33,9 @@ def _source(store):
     papers = _papers(store.db)
     records = [{'kind': kind, 'node_id': node_id, 'text_hash': digest(text)}
                for kind, node_id, text in _rows(store.db, papers)]
+    # HNSWIndex historically inserted the complete ID map in sorted order.
+    # Preserve that order while streaming bounded vector-cache batches.
+    records.sort(key=lambda row: row['kind'] + '\0' + row['node_id'])
     keys = [(r['kind'], r['node_id']) for r in records]
     if len(keys) != len(set(keys)) or not records:
         raise ValueError('Empty or duplicated dense source')
@@ -68,7 +71,7 @@ def build(run_id: str, index_dir: str | Path, model_id: str, *, query_model_id: 
         with store.db.transaction():
             store.db.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
             meta, records, source_fingerprint = _source(store)
-            vectors = {}
+            index = HNSWIndex({}, model_id=model_id)
             dimension = None
             for start in range(0, len(records), batch_size):
                 chunk = records[start:start + batch_size]
@@ -80,8 +83,8 @@ def build(run_id: str, index_dir: str | Path, model_id: str, *, query_model_id: 
                         dimension = len(vector)
                     if len(vector) != dimension:
                         raise ValueError('Inconsistent document vector dimensions')
-                    vectors[item_id] = vector
-        index = HNSWIndex(vectors, model_id=model_id)
+                    index.upsert(item_id, vector)
+                del cache
         kind_counts = {kind: sum(r['kind'] == kind for r in records) for kind in KINDS}
         manifest = {'format': FORMAT, 'run_id': run_id, 'graph_namespace': meta.get('neo4j_run_id'),
                     'snapshot_hash': meta.get('snapshot_hash'), 'model_id': model_id,

@@ -112,7 +112,7 @@ def build(run_id: str, index_dir: str | Path, model, *, database_url: str | None
 
 
 class PaperDenseIndex:
-    """Cold load validates a frozen source and builds HNSW once per instance."""
+    """Cold load validates a frozen source and loads its saved HNSW graph."""
     def __init__(self, run_id: str, index_dir: str | Path, model, *, database_url: str | None = None):
         path=Path(index_dir)
         manifest=json.loads((path/'manifest.json').read_text(encoding='utf-8'))

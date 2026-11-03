@@ -12,8 +12,10 @@ from psycopg import sql
 
 from kg_builder.paper_dense import PaperDenseIndex, build
 from kg_builder.persistent_dense import PersistentDenseIndex, build as build_persistent, verify_source
+import kg_builder.persistent_dense as persistent_dense
 from kg_builder.postgres_graph import GraphStore
 from kg_builder.semantic_store import SemanticStore, digest
+from kg_builder.vector_index import HNSWIndex
 
 
 class Model:
@@ -150,8 +152,20 @@ class PaperDenseTests(unittest.TestCase):
             self.store.db.execute('INSERT INTO embedding_cache VALUES(%s,%s,%s)',
                 (model.model_id,digest(text),json.dumps(vector)))
         target=Path(self.temp.name)/'six-kind'
-        manifest=build_persistent(self.run,target,model.model_id,
-            query_model_id=model.query_model_id,database_url=self.url,batch_size=2)
+        events=[]
+        original_batch=persistent_dense._cache_batch
+        original_upsert=HNSWIndex.upsert
+        def cache_batch(*args):
+            events.append('fetch')
+            return original_batch(*args)
+        def upsert(index,item_id,vector):
+            events.append('upsert')
+            return original_upsert(index,item_id,vector)
+        with patch('kg_builder.persistent_dense._cache_batch',side_effect=cache_batch), \
+             patch.object(HNSWIndex,'upsert',autospec=True,side_effect=upsert):
+            manifest=build_persistent(self.run,target,model.model_id,
+                query_model_id=model.query_model_id,database_url=self.url,batch_size=2)
+        self.assertEqual(events[:4],['fetch','upsert','upsert','fetch'])
         self.assertEqual(manifest['count'],7)
         self.assertEqual(set(manifest['kind_counts']),
             {'Paper','ResearchProblem','Method','Benchmark','Contribution','ResearchArea'})
