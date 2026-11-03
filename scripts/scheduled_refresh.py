@@ -1,16 +1,17 @@
-"""Design-only scheduled ETL entrypoint. NEVER enabled by default; not tested.
-
-A future external scheduler may call this after implementing data sources,
-review/validation, Neo4j writes, checkpoints and Drive snapshot replacement.
-"""
+"""Opt-in scheduler entrypoint for publishing an already approved batch."""
 from __future__ import annotations
 import os
+from pathlib import Path
+import sys
 
 
-def run_scheduled_refresh():
+def run_scheduled_refresh(argv=None):
     if os.getenv('ENABLE_SCHEDULED_KG_REFRESH') != 'true':
         raise RuntimeError('Scheduled incremental ingestion is disabled by default')
-    raise NotImplementedError('Production scheduling/graph write path is not implemented')
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from scripts.publish_incremental_graph import main
+
+    return main(argv)
 
 
 if __name__=='__main__':

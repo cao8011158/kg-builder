@@ -27,7 +27,7 @@ The corpus is a **candidate metadata pool** until a relevance review is performe
 - `scripts/apply_corpus_batch.py` is retired: both its CLI and imported `run` refuse before opening storage or writing files. Use native PostgreSQL preparation and snapshot graph commands; [the corpus batch workflow](docs/CORPUS_BATCH_WORKFLOW.md) is historical.
 - `src/kg_builder/extraction_api.py`: optional, **disabled by default; live API not exercised**, OpenAI-compatible draft extractor. Its v0.3 output must match the requested paper/version and schema; collection does not trigger it.
 - `scripts/semantic_pipeline.py`: explicit selected-source import between native PostgreSQL runs, candidate problem clustering, review export/import and hybrid retrieval. See [PostgreSQL graph operations](docs/POSTGRES_GRAPH.md).
-- `scripts/scheduled_refresh.py` and `src/kg_builder/incremental_update.py`: **disabled/unfinished** scheduled ingestion placeholders. Do not report them as operating background jobs.
+- `scripts/publish_incremental_graph.py` replays an approved delta against a completed graph and writes a separate release. `scripts/scheduled_refresh.py` calls the same workflow when explicitly enabled. See [incremental graph publishing](docs/POSTGRES_GRAPH.md#incremental-graph-publishing).
 - `config/discovery_queries.json`: current three-domain queries; each source has different search syntax and must be validated in a network-enabled runtime.
 
 ## Setup

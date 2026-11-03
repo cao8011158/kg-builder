@@ -13,6 +13,23 @@ python scripts/build_snapshot_graph.py --snapshot prepared.json --job-dir graph-
 
 `--run-id` is optional for graph commands. A fresh directory receives a UUID identity in `graph-job.json`; later commands reuse it. An explicit identity must match an existing descriptor. Preserve this credential-free descriptor and the immutable input snapshot when moving a job. Reconnecting to the same database and identity restores PostgreSQL state; local proposal JSON is diagnostic output, not state authority. Existing SQLite graph directories cannot be resumed or migrated by these commands: use a fresh PostgreSQL job directory.
 
+## Incremental graph publishing
+
+Use a completed, indexed `domain-v1` graph with `whole-group-v1` review and its exact prepared snapshot as the base. Export the next approved batch through the existing preparation workflow with the same review policy and embedding model. The batch contains new or replacement records keyed by the canonical paper ID. Supply `--remove-paper-id` for each intentional removal. Use a dedicated release directory per batch.
+
+```bash
+python scripts/publish_incremental_graph.py --base-run-id graph-current --base-snapshot current/prepared.json --delta-snapshot approved-batch.json --release-dir next --prepare-only
+python scripts/publish_incremental_graph.py --base-run-id graph-current --base-snapshot current/prepared.json --delta-snapshot approved-batch.json --release-dir next
+```
+
+`--prepare-only` writes the merged snapshot without opening graph services. Publishing requires PostgreSQL, Neo4j, the configured graph review and embedding providers, and the BM25 optional dependency. The revision has a deterministic PostgreSQL run ID and its own Neo4j namespace. Method and Benchmark review follows changes to source items and reuses compatible prior evidence. ResearchProblem clustering runs on the merged corpus. Unambiguous continuing entities and areas retain their IDs, and the revision records lineage for membership changes.
+
+If the result is `waiting_for_names`, use `build_snapshot_graph.py` with the reported snapshot and job directory to claim and submit area names. Submit with `--neo4j` and the same Jev model. Run the publishing command again with identical inputs. Reruns resume the same revision, including pending outbox delivery. A conflicting batch requires its own release directory.
+
+`next/release.json` appears after structural validation, outbox delivery and a matching BM25 build. It identifies the new graph run, Neo4j namespace and snapshot hash. Use that run ID for native semantic retrieval. Consumers can select the new release using the manifest, and the previous release remains available under its own namespace.
+
+An external scheduler can invoke `scripts/scheduled_refresh.py` with the same arguments and `ENABLE_SCHEDULED_KG_REFRESH=true`. The entrypoint expects an already approved batch. Configure any collection, extraction, review and batch selection separately.
+
 Graph Jev concurrency defaults to **8** for `run` and Neo4j `submit`; `--jev-concurrency` changes the shared HTTP limit and bounds in-flight pair batches. A batch contains **32** pairs by default, configured by `run --batch-size`. Naming concurrency defaults to 3. Status and claim do not construct embedding, Jev, or Neo4j API clients, including cold reopening. Neo4j publication requires `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, and optionally `NEO4J_DATABASE`.
 
 Semantic commands also identify a PostgreSQL run:

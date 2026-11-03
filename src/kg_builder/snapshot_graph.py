@@ -134,6 +134,52 @@ def domain_group_projection(group, audits, mention_rows, model_id):
     return entities,assignments,areas,memberships
 
 
+def revision_identity(old_entities, old_areas, new_entities, new_areas, unchanged, snapshot_hash):
+    """Inherit IDs only across a mutual one-to-one overlap of unchanged evidence."""
+    mapping={};lineage={}
+    for category,old,new in (('entities',old_entities,new_entities),
+                             ('research_areas',old_areas,new_areas)):
+        new_by_member={}
+        for new_id,(kind,members) in new.items():
+            for mid in members.intersection(unchanged):
+                new_by_member.setdefault((kind,mid),set()).add(new_id)
+        edges=set()
+        for old_id,(old_kind,old_members) in old.items():
+            for mid in old_members.intersection(unchanged):
+                edges.update((old_id,new_id) for new_id in new_by_member.get((old_kind,mid),()))
+        old_degree={};new_degree={}
+        for old_id,new_id in edges:
+            old_degree[old_id]=old_degree.get(old_id,0)+1
+            new_degree[new_id]=new_degree.get(new_id,0)+1
+        records=[]
+        for old_id,new_id in sorted(edges):
+            inherited=old_degree[old_id]==new_degree[new_id]==1
+            if inherited:
+                mapping[new_id]=old_id
+            records.append({'old_id':old_id,'new_id':new_id,
+                            'relation':'inherited' if inherited else 'overlap'})
+        lineage[category]=records
+    old_ids=set(old_entities)|set(old_areas)
+    new_ids=set(new_entities)|set(new_areas)
+    reserved=old_ids|new_ids
+    for node_id in sorted(new_ids):
+        if node_id in mapping:continue
+        if node_id not in old_ids:continue
+        if node_id in new_entities and new_entities[node_id][0]=='ResearchProblem':continue
+        prefix=node_id.split(':',1)[0]+':'
+        counter=0
+        while True:
+            alternate=prefix+digest(['revision',snapshot_hash,node_id,counter])[:32]
+            if alternate not in reserved:
+                reserved.add(alternate);mapping[node_id]=alternate;break
+            counter+=1
+    mapping={key:value for key,value in mapping.items() if key!=value}
+    effective={node_id:mapping.get(node_id,node_id) for node_id in new_ids}
+    if len(set(effective.values()))!=len(effective):
+        raise ValueError('Revision inherited ID collides with a current entity')
+    return mapping,lineage
+
+
 class SnapshotGraph:
     def __init__(self, snapshot_path, job_dir, **options):
         try:
@@ -142,8 +188,8 @@ class SnapshotGraph:
             if hasattr(self, 'graph_store'):self.graph_store.close()
             raise
 
-    def _initialize(self, snapshot_path, job_dir, *, client=None, k=20, batch_size=32,
-                 name_mode='external', model=None, lease_seconds=1800, namer=None, name_base_url=None, name_model=None, read_input=True, embedding_cache_dir=None, name_concurrency=3, graph_policy=None, problem_resolution=None, context_format=None, entity_same_min_probability=None, member_review_mode=None, publisher=None, voyage_options=None, run_id=None, database_url=None):
+    def _initialize(self, snapshot_path, job_dir, *, client=None, k=None, batch_size=32,
+                 name_mode='external', model=None, lease_seconds=1800, namer=None, name_base_url=None, name_model=None, read_input=True, embedding_cache_dir=None, name_concurrency=3, graph_policy=None, problem_resolution=None, context_format=None, entity_same_min_probability=None, member_review_mode=None, publisher=None, voyage_options=None, run_id=None, database_url=None, base_run_id=None):
         self.voyage_options = voyage_options or {}
         self.publisher = publisher
         self.snapshot_path = Path(snapshot_path).resolve()
@@ -170,7 +216,27 @@ class SnapshotGraph:
         binding_lock=int.from_bytes(hashlib.sha256(('graph-binding:'+self.run_id).encode()).digest()[:8],'big',signed=True)
         with self.db.transaction():
             self.db.execute('SELECT pg_advisory_xact_lock(%s)',(binding_lock,))
-            if k is None:k = int(self._meta('k') or 20)
+            saved = self._meta('snapshot_hash')
+            saved_base=self._meta('base_run_id')
+            if saved_base and base_run_id is not None and saved_base!=base_run_id:
+                raise ValueError('Graph revision baseline cannot be changed')
+            self.base_run_id=saved_base or base_run_id
+            if self.base_run_id==self.run_id:
+                raise ValueError('Graph revision requires a distinct run_id')
+            incremental=self.snapshot.get('incremental')
+            has_delta=incremental is not None
+            if not saved_base and bool(base_run_id)!=has_delta:
+                raise ValueError('Incremental snapshot and base_run_id must be supplied together')
+            if saved_base and not quick and not has_delta:
+                raise ValueError('Revision snapshot is missing incremental metadata')
+            if saved and not saved_base and base_run_id is not None:
+                raise ValueError('Existing graph run cannot become a revision')
+            base_meta={}
+            if self.base_run_id:
+                base=self._base_store()
+                try:base_meta={r['key']:r['value'] for r in base.db.execute("SELECT key,value FROM meta WHERE key IN ('k','problem_resolution','entity_same_min_probability','context_format','decision_metric','member_review_mode','graph_policy','snapshot_hash','phase','index_status','model_id')")}
+                finally:base.close()
+            if k is None:k = int(self._meta('k') or base_meta.get('k') or 20)
             if name_mode is None:name_mode = self._meta('name_mode') or 'external'
             self.k, self.batch_size, self.client, self.name_mode = k, batch_size, client, name_mode
             self.model = model
@@ -186,13 +252,14 @@ class SnapshotGraph:
                 raise ValueError('Positive k and batch_size required')
             if name_mode not in ('external', 'api'):
                 raise ValueError('name_mode must be external or api')
-            saved = self._meta('snapshot_hash')
             if entity_same_min_probability is not None and (not isinstance(entity_same_min_probability,(int,float))
                     or isinstance(entity_same_min_probability,bool) or not math.isfinite(entity_same_min_probability)
                     or not 0 <= entity_same_min_probability <= 1):
                 raise ValueError('entity_same_min_probability must be within [0, 1]')
             saved_same=self._meta('entity_same_min_probability')
-            self.entity_same_min_probability=float(saved_same) if saved_same is not None else (0.7 if saved else 0.6)
+            self.entity_same_min_probability=(float(saved_same) if saved_same is not None else
+                float(base_meta['entity_same_min_probability']) if 'entity_same_min_probability' in base_meta else
+                (0.7 if saved else 0.6))
             if entity_same_min_probability is not None:
                 if saved and float(entity_same_min_probability)!=self.entity_same_min_probability:
                     raise ValueError('Graph job entity_same_min_probability cannot be changed')
@@ -203,18 +270,18 @@ class SnapshotGraph:
                                                   or not math.isfinite(problem_resolution) or problem_resolution <= 0):
                 raise ValueError('Positive finite problem_resolution required')
             saved_resolution=self._meta('problem_resolution')
-            self.problem_resolution=float(saved_resolution) if saved_resolution is not None else 0.05
+            self.problem_resolution=float(saved_resolution) if saved_resolution is not None else float(base_meta.get('problem_resolution') or 0.05)
             if problem_resolution is not None:
                 if saved and float(problem_resolution)!=self.problem_resolution:
                     raise ValueError('Graph job problem_resolution cannot be changed')
                 self.problem_resolution=float(problem_resolution)
             if not math.isfinite(self.problem_resolution) or self.problem_resolution<=0:
                 raise ValueError('Invalid saved problem_resolution')
-            self.decision_metric=self._meta('decision_metric') or ('confidence' if saved else 'probability')
+            self.decision_metric=self._meta('decision_metric') or base_meta.get('decision_metric') or ('confidence' if saved else 'probability')
             if self.decision_metric not in ('probability','confidence'):
                 raise ValueError('Invalid saved decision_metric')
             saved_format=self._meta('context_format')
-            self.context_format=saved_format if saved_format is not None else ('registry-v1' if saved else 'explicit-v1')
+            self.context_format=saved_format if saved_format is not None else (base_meta.get('context_format') or ('registry-v1' if saved else 'explicit-v1'))
             if context_format is not None and (context_format not in ('registry-v1','explicit-v1') or
                                                saved and context_format!=self.context_format):
                 raise ValueError('Graph job context_format cannot be changed or is invalid')
@@ -255,6 +322,11 @@ class SnapshotGraph:
                 raise ValueError('Frozen snapshot bytes changed')
             if not saved:
                 with self.db.transaction():
+                    if self.base_run_id:
+                        self._set_meta('base_run_id',self.base_run_id)
+                        self._set_meta('base_snapshot_hash',incremental['base_snapshot_hash'])
+                        self._set_meta('delta_snapshot_hash',incremental['delta_snapshot_hash'])
+                        self._set_meta('removed_paper_ids',json.dumps(incremental['removed_paper_ids'],sort_keys=True))
                     self._set_meta('snapshot_hash', self.snapshot['snapshot_hash'])
                     self._set_meta('file_hash', self.file_hash)
                     self._set_meta('snapshot_stat', stamp)
@@ -280,6 +352,11 @@ class SnapshotGraph:
                 frozen_model = next(iter(ids)) if len(ids) == 1 else None
             if self.model is not None and frozen_model and self.model.model_id != frozen_model:
                 raise ValueError('Embedding model differs from snapshot')
+            if self.base_run_id:
+                self._check_revision_base()
+                pinned_jev=self._meta('jev_model')
+                if self.client is not None and pinned_jev and getattr(self.client,'model',None)!=pinned_jev:
+                    raise ValueError('Revision Jev model differs from baseline')
 
             if self.publisher is not None:
                 if self.graph_policy != 'domain-v1':raise ValueError('Neo4j publishing requires domain-v1')
@@ -302,6 +379,58 @@ class SnapshotGraph:
                     with self.db.transaction():self._set_meta('neo4j_run_id','graph:'+uuid.uuid4().hex)
             elif self._meta('neo4j_run_id') and read_input:
                 raise ValueError('This graph job requires its Neo4j publisher')
+
+    def _base_store(self):
+        return GraphStore(self.base_run_id,database_url=self.database_url,readonly=True,initialize=False)
+
+    def _check_revision_base(self):
+        if self.graph_policy!='domain-v1' or self.member_review_mode!='whole-group-v1':
+            raise ValueError('Incremental revision requires domain-v1 whole-group-v1')
+        incremental=self.snapshot.get('incremental')
+        if not isinstance(incremental,dict) or not isinstance(incremental.get('base_snapshot_hash'),str) or not isinstance(incremental.get('delta_snapshot_hash'),str) or not isinstance(incremental.get('removed_paper_ids'),list):
+            # A read_input=False preflight opens only the pinned digest.
+            if set(self.snapshot)!={'snapshot_hash'}:
+                raise ValueError('Incomplete incremental snapshot metadata')
+            incremental={'base_snapshot_hash':self._meta('base_snapshot_hash'),
+                         'delta_snapshot_hash':self._meta('delta_snapshot_hash'),
+                         'removed_paper_ids':json.loads(self._meta('removed_paper_ids') or 'null')}
+        if (incremental['base_snapshot_hash']!=self._meta('base_snapshot_hash') or
+                incremental['delta_snapshot_hash']!=self._meta('delta_snapshot_hash') or
+                incremental['removed_paper_ids']!=json.loads(self._meta('removed_paper_ids') or 'null')):
+            raise ValueError('Revision snapshot lineage metadata changed')
+        base=self._base_store()
+        try:
+            meta={r['key']:r['value'] for r in base.db.execute("SELECT key,value FROM meta WHERE key IN ('snapshot_hash','phase','index_status','completed_at','graph_policy','decision_metric','context_format','member_review_mode','problem_resolution','entity_same_min_probability','model_id','k','jev_model')")}
+            if (meta.get('phase')!='complete' or meta.get('index_status')!='verified' or
+                    not meta.get('completed_at') or meta.get('graph_policy')!='domain-v1' or
+                    meta.get('member_review_mode')!='whole-group-v1'):
+                raise ValueError('Revision baseline must be completed indexed domain-v1 whole-group-v1')
+            if base.db.execute('SELECT 1 FROM graph_outbox WHERE delivered=0 LIMIT 1').fetchone():
+                raise ValueError('Revision baseline has unpublished graph events')
+            expected=incremental['base_snapshot_hash']
+            if meta.get('snapshot_hash')!=expected:
+                raise ValueError('Revision baseline snapshot hash differs')
+            for key,value in (('k',str(self.k)),('decision_metric',self.decision_metric),('context_format',self.context_format),
+                ('problem_resolution',str(self.problem_resolution)),('entity_same_min_probability',str(self.entity_same_min_probability))):
+                if meta.get(key)!=value:raise ValueError('Revision baseline graph policy differs: '+key)
+            model_ids={r['model_id'] for r in self.snapshot.get('vectors',[])}
+            if model_ids and meta.get('model_id') and model_ids!={meta['model_id']}:
+                raise ValueError('Revision baseline embedding model differs')
+            pinned_jev=self._meta('jev_model') or meta.get('jev_model')
+            jev_models=({pinned_jev} if pinned_jev else
+                {r['requested_model'] for r in base.db.execute('''SELECT DISTINCT audit::jsonb #>> '{raw,requested_model}' AS requested_model
+                    FROM candidates WHERE audit IS NOT NULL
+                    UNION SELECT DISTINCT audit::jsonb #>> '{raw,requested_model}' AS requested_model
+                    FROM member_reviews WHERE audit IS NOT NULL''') if r['requested_model']})
+            if len(jev_models)>1:raise ValueError('Revision baseline used mixed Jev models')
+            jev_model=next(iter(jev_models),None)
+            if jev_model and self.client is not None and getattr(self.client,'model',None)!=jev_model:
+                raise ValueError('Revision Jev model differs from baseline')
+            if not jev_model and self.client is not None:
+                jev_model=getattr(self.client,'model',None)
+            if jev_model and not self._meta('jev_model'):
+                with self.db.transaction():self._set_meta('jev_model',jev_model)
+        finally:base.close()
 
     def _enqueue(self, kind, key, payload):
         if self.publisher is None:return
@@ -333,8 +462,9 @@ class SnapshotGraph:
                     if not self._meta('neo4j_first_'+kind+'_delivery_at'):self._set_meta('neo4j_first_'+kind+'_delivery_at',str(started))
                     self._set_meta('neo4j_latest_delivery_at',str(time.time()))
 
-    def _enqueue_group(self, group_id, store):
+    def _enqueue_group(self, group_id, store, *, revision_ids=None):
         if self.publisher is None:return
+        if self.base_run_id and revision_ids is None:return
         group=self.db.execute('SELECT * FROM groups WHERE group_id=%s',(group_id,)).fetchone()
         mids=json.loads(group['members_json'])
         audits={r['mention_id']:r['excluded'] for r in self.db.execute('SELECT mention_id,excluded FROM member_reviews WHERE group_id=%s',(group_id,))}
@@ -342,6 +472,11 @@ class SnapshotGraph:
         if group['kind']=='ResearchProblem' and len(mids)>=2 and not self.db.execute("SELECT 1 FROM tasks WHERE group_id=%s AND status='done'",(group_id,)).fetchone():return
         mention_rows={mid:dict(store.db.execute('SELECT m.*,s.source_hash FROM mentions m JOIN sources s ON s.extraction_id=m.extraction_id WHERE m.mention_id=%s',(mid,)).fetchone()) for mid in mids}
         entities,assignments,areas,memberships=domain_group_projection(group,audits,mention_rows,store.model.model_id if store.model else None)
+        if self.base_run_id:
+            for entity in entities:entity['entity_id']=revision_ids.get(entity['entity_id'],entity['entity_id'])
+            for area in areas:area['area_id']=revision_ids.get(area['area_id'],area['area_id'])
+            for assignment in assignments:assignment['entity_id']=revision_ids.get(assignment['entity_id'],assignment['entity_id'])
+            for membership in memberships:membership['area_id']=revision_ids.get(membership['area_id'],membership['area_id'])
         from .neo4j_store import node,edge
         nodes=[node(e['entity_id'],e['kind'],name=e['name'],description=e['description'],aliases=e['aliases'],name_origin=e['name_origin']) for e in entities]
         nodes.extend(node(a['area_id'],'ResearchArea',name=a['name'],description=a['description']) for a in areas)
@@ -500,7 +635,17 @@ class SnapshotGraph:
     def _candidates(self):
         store = self._semantic_store()
         try:
-            rows = store.db.execute('SELECT m.mention_id,m.item_key,m.kind,s.paper_id FROM mentions m JOIN sources s ON s.extraction_id=m.extraction_id ORDER BY m.kind,m.mention_id').fetchall()
+            rows = store.db.execute('SELECT m.mention_id,m.item_key,m.kind,m.mention_hash,s.paper_id,s.source_hash FROM mentions m JOIN sources s ON s.extraction_id=m.extraction_id ORDER BY m.kind,m.mention_id').fetchall()
+            unchanged=set()
+            previous=[]
+            if self.base_run_id:
+                base=self._base_store()
+                try:
+                    old={r['mention_id']:(r['mention_hash'],r['source_hash']) for r in base.db.execute('SELECT m.mention_id,m.mention_hash,s.source_hash FROM mentions m JOIN sources s ON s.extraction_id=m.extraction_id')}
+                    unchanged={r['mention_id'] for r in rows if old.get(r['mention_id'])==(r['mention_hash'],r['source_hash'])}
+                    previous=[dict(r) for r in base.db.execute('SELECT pair_id,kind,left_id,right_id,similarity,decision,audit FROM candidates')
+                              if r['left_id'] in unchanged and r['right_id'] in unchanged]
+                finally:base.close()
             vectors = {r['item_key']: (r['model_id'], r['vector']) for r in self.snapshot['vectors']}
             bykind = {kind: {} for kind in KINDS.values()}
             for r in rows:
@@ -510,6 +655,7 @@ class SnapshotGraph:
                 if self.graph_policy == 'domain-v1' and kind == 'ResearchProblem':continue
                 index = HNSWIndex(data, self._meta('model_id') or 'empty-snapshot')
                 for mid, vector in data.items():
+                    if mid in unchanged:continue
                     selected = 0
                     for neighbor in index.search(vector, min(len(data), self.k+1)):
                         other = neighbor['id']
@@ -522,17 +668,23 @@ class SnapshotGraph:
                         pairs[(kind,a,b)] = max(pairs.get((kind,a,b),-1),neighbor['similarity'])
             proposal = cluster_problem_vectors(bykind['ResearchProblem'],k=self.k,resolution=self.problem_resolution)
             with self.db.transaction():
+                for r in previous:
+                    self.db.execute('INSERT INTO candidates(pair_id,kind,left_id,right_id,similarity,decision,audit) VALUES(%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING',
+                                    (r['pair_id'],r['kind'],r['left_id'],r['right_id'],r['similarity'],r['decision'],r['audit']))
                 for (kind,a,b),similarity in sorted(pairs.items()):
                     pid = 'pair:' + digest([kind,a,b])[:32]
                     self.db.execute('INSERT INTO candidates(pair_id,kind,left_id,right_id,similarity) VALUES(%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING',
                                     (pid,kind,a,b,similarity))
                 self._set_meta('problem_proposal',json.dumps(proposal,sort_keys=True))
                 self._set_meta('phase','candidates')
-            return len(pairs)
+            return len(pairs)+len(previous)
         finally: store.close()
 
     def _judge(self):
         from .decision_api import judge_pairs
+        if not self.db.execute("SELECT 1 FROM candidates WHERE decision='unjudged' LIMIT 1").fetchone():
+            with self.db.transaction():self._set_meta('phase','judged')
+            return
         if self.client is None:
             raise ValueError('Jev client required for unjudged candidate pairs')
         store = self._semantic_store()
@@ -677,10 +829,9 @@ class SnapshotGraph:
     def _groups_domain(self):
         """Review each candidate membership; neither uncertainty nor pending edges freeze a group."""
         from .decision_api import review_group_members
-        if self.client is None:raise ValueError('Jev client required for member review')
         store=self._semantic_store()
         try:
-            members={r['mention_id']:dict(r) for r in store.db.execute('SELECT * FROM mentions')}
+            members={r['mention_id']:dict(r) for r in store.db.execute('SELECT m.*,s.source_hash FROM mentions m JOIN sources s ON s.extraction_id=m.extraction_id')}
             parent={mid:mid for mid,r in members.items() if r['kind']!='ResearchProblem'}
             def root(mid):
                 while parent[mid]!=mid:
@@ -713,6 +864,7 @@ class SnapshotGraph:
                     self.db.execute('''INSERT INTO groups(group_id,kind,members_json,name,description,review)
                                        VALUES(%s,%s,%s,%s,%s,'unreviewed') ON CONFLICT DO NOTHING''',
                                     (group['group_id'],group['kind'],json.dumps(group['members']),group['name'],group['description']))
+            if self.base_run_id:self._reuse_group_reviews(groups,members)
             inputs=[];group_context={}
             for g in groups:
                 if g['kind']=='ResearchProblem':continue
@@ -732,6 +884,7 @@ class SnapshotGraph:
                                    'member':member}
                     inputs.append(item)
             batches=[inputs[start:start+self.batch_size] for start in range(0,len(inputs),self.batch_size)]
+            if batches and self.client is None:raise ValueError('Jev client required for member review')
             for batch in batches:
                 if not batch:continue
                 try:results=review_group_members(batch,self.client,decision_metric=self.decision_metric,
@@ -750,7 +903,8 @@ class SnapshotGraph:
                             raise ValueError('Member exclusion disagrees with strict policy')
                         self.db.execute('INSERT INTO member_reviews VALUES(%s,%s,%s,%s)',
                                         (item['group_id'],item['member']['mention_id'],int(result['excluded']),json.dumps(result,sort_keys=True)))
-                    for gid in {item['group_id'] for item in batch}:self._enqueue_group(gid,store)
+                    if not self.base_run_id:
+                        for gid in {item['group_id'] for item in batch}:self._enqueue_group(gid,store)
                 self._drain()
             with self.db.transaction():
                 for g in groups:
@@ -759,9 +913,39 @@ class SnapshotGraph:
                         self.db.execute("INSERT INTO tasks(task_id,group_id,status,queued_at) VALUES(%s,%s,'queued',%s) ON CONFLICT DO NOTHING",
                                         ('name:'+g['group_id'],g['group_id'],time.time()))
                 self._set_meta('phase','grouped')
-                for g in groups:self._enqueue_group(g['group_id'],store)
+                if not self.base_run_id:
+                    for g in groups:self._enqueue_group(g['group_id'],store)
             self._drain()
         finally:store.close()
+
+    def _reuse_group_reviews(self,groups,members):
+        """Copy only reviews whose complete Jev context and member evidence is identical."""
+        base=self._base_store()
+        try:
+            old={r['mention_id']:dict(r) for r in base.db.execute('''SELECT m.mention_id,m.name,m.description,m.source_json,m.mention_hash,s.source_hash
+                FROM mentions m JOIN sources s ON s.extraction_id=m.extraction_id''')}
+            current={mid:(m['name'],m['description'],m['source_json'],m['mention_hash'],m['source_hash']) for mid,m in members.items()}
+            old_groups={r['group_id']:dict(r) for r in base.db.execute('SELECT * FROM groups')}
+            with self.db.transaction():
+                for group in groups:
+                    prior=old_groups.get(group['group_id'])
+                    if not prior or prior['kind']!=group['kind'] or json.loads(prior['members_json'])!=group['members']:
+                        continue
+                    mids=group['members']
+                    if any(mid not in old or current[mid]!=(old[mid]['name'],old[mid]['description'],old[mid]['source_json'],old[mid]['mention_hash'],old[mid]['source_hash']) for mid in mids):
+                        continue
+                    if group['kind']=='ResearchProblem':
+                        task=base.db.execute("SELECT * FROM tasks WHERE group_id=%s AND status='done'",(group['group_id'],)).fetchone()
+                        if not task or prior['review']!='accepted' or not prior['name'] or not prior['description']:
+                            continue
+                        self.db.execute('''UPDATE groups SET name=%s,description=%s,name_review=%s,name_audit=%s WHERE group_id=%s''',
+                            (prior['name'],prior['description'],prior['name_review'],prior['name_audit'],group['group_id']))
+                        self.db.execute('''INSERT INTO tasks(task_id,group_id,status,queued_at,result_json) VALUES(%s,%s,'done',%s,%s) ON CONFLICT DO NOTHING''',
+                            (task['task_id'],group['group_id'],task['queued_at'],task['result_json']))
+                    for row in base.db.execute('SELECT * FROM member_reviews WHERE group_id=%s',(group['group_id'],)):
+                        self.db.execute('INSERT INTO member_reviews(group_id,mention_id,excluded,audit) VALUES(%s,%s,%s,%s) ON CONFLICT DO NOTHING',
+                            (row['group_id'],row['mention_id'],row['excluded'],row['audit']))
+        finally:base.close()
 
     def _strict_exclusion(self, result):
         metric=result.get('decision_metric',self.decision_metric)
@@ -816,7 +1000,8 @@ class SnapshotGraph:
                         result={**result,'area_revision':digest([item['name'],item['description']])}
                         self.db.execute('INSERT INTO member_reviews VALUES(%s,%s,%s,%s)',
                                         (item['group_id'],item['member']['mention_id'],int(result['excluded']),json.dumps(result,sort_keys=True)))
-                    for gid in {item['group_id'] for item in batch}:self._enqueue_group(gid,store)
+                    if not self.base_run_id:
+                        for gid in {item['group_id'] for item in batch}:self._enqueue_group(gid,store)
                 self._drain()
         finally:store.close()
 
@@ -959,6 +1144,15 @@ class SnapshotGraph:
                 projection=domain_group_projection(group,audits,mention_rows,store.model.model_id if store.model else None)
                 entities.extend(projection[0]);assignments.extend(projection[1]);areas.extend(projection[2]);memberships.extend(projection[3])
             if covered!=set(mention_rows):raise ValueError('Graph groups do not cover all source mentions')
+            if self.base_run_id:
+                ids,lineage=self._revision_identity(entities,assignments,areas,memberships,mention_rows)
+                with self.db.transaction():
+                    self._set_meta('revision_node_ids',json.dumps(ids,sort_keys=True))
+                    self._set_meta('revision_lineage',json.dumps(lineage,sort_keys=True))
+                for entity in entities:entity['entity_id']=ids.get(entity['entity_id'],entity['entity_id'])
+                for assignment in assignments:assignment['entity_id']=ids.get(assignment['entity_id'],assignment['entity_id'])
+                for area in areas:area['area_id']=ids.get(area['area_id'],area['area_id'])
+                for membership in memberships:membership['area_id']=ids.get(membership['area_id'],membership['area_id'])
             review={'schema_version':REVIEW_VERSION,'review_id':'snapshot:'+self.snapshot['snapshot_hash'],
                     'entities':entities,'assignments':assignments}
             result=store.import_review(review)
@@ -966,7 +1160,36 @@ class SnapshotGraph:
             with self.db.transaction():
                 self._set_meta('phase','complete');self._set_meta('review_result',json.dumps(result))
                 self._set_meta('area_result',json.dumps(area_result))
+                if self.base_run_id:
+                    for group in groups:self._enqueue_group(group['group_id'],store,revision_ids=ids)
+            self._drain()
         finally:store.close()
+
+    def _revision_identity(self,entities,assignments,areas,memberships,mention_rows):
+        old_entities={};old_areas={}
+        base=self._base_store()
+        try:
+            for row in base.db.execute('SELECT entity_id,kind FROM entities'):
+                old_entities[row['entity_id']]=(row['kind'],set())
+            for row in base.db.execute('SELECT area_id FROM research_areas'):
+                old_areas[row['area_id']]=('ResearchArea',set())
+            unchanged=set()
+            for row in base.db.execute('''SELECT m.mention_id,m.mention_hash,m.entity_id,s.source_hash
+                FROM mentions m JOIN sources s ON s.extraction_id=m.extraction_id'''):
+                mid=row['mention_id']
+                current=mention_rows.get(mid)
+                if current and current['mention_hash']==row['mention_hash'] and current['source_hash']==row['source_hash']:
+                    unchanged.add(mid)
+                if row['entity_id'] in old_entities:
+                    old_entities[row['entity_id']][1].add(mid)
+            for row in base.db.execute('SELECT area_id,mention_id FROM research_area_members'):
+                if row['area_id'] in old_areas:old_areas[row['area_id']][1].add(row['mention_id'])
+        finally:base.close()
+        new_entities={e['entity_id']:(e['kind'],set()) for e in entities}
+        for assignment in assignments:new_entities[assignment['entity_id']][1].add(assignment['mention_id'])
+        new_areas={a['area_id']:('ResearchArea',set()) for a in areas}
+        for membership in memberships:new_areas[membership['area_id']][1].add(membership['mention_id'])
+        return revision_identity(old_entities,old_areas,new_entities,new_areas,unchanged,self.snapshot['snapshot_hash'])
 
     def _final_name_review(self):
         """Review the actual generated display claim after external/API naming."""

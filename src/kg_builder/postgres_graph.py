@@ -90,8 +90,12 @@ def graph_run_identity(job_dir, run_id=None):
                 json.dump(value,stream,sort_keys=True)
                 stream.flush()
                 os.fsync(stream.fileno())
-            # Hard-link publishes complete bytes atomically without overwriting a winner.
-            try:os.link(temporary,descriptor)
+            # Windows rename and POSIX hard links publish without replacing a winner.
+            try:
+                if os.name == 'nt':
+                    os.rename(temporary,descriptor)
+                else:
+                    os.link(temporary,descriptor)
             except FileExistsError:pass
         finally:temporary.unlink(missing_ok=True)
     try:value=json.loads(descriptor.read_text(encoding='utf-8'))

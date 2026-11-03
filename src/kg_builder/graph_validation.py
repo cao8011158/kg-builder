@@ -6,13 +6,152 @@ import json
 import math
 from collections import Counter, defaultdict
 from pathlib import Path
+from psycopg import sql
 
 from .semantic_store import KINDS, SemanticStore, digest
-from .postgres_graph import SCHEMA_REVISION
+from .postgres_graph import SCHEMA_FINGERPRINT, SCHEMA_REVISION
 from .snapshot_graph import canonical_hash, read_snapshot
 
 FIELDS = {**KINDS, 'contributions': 'Contribution'}
 DETAIL_LIMIT = 20
+
+
+def _revision_contract(graph, meta, snapshot, current_run_id, expected_entities, expected_areas,
+                       expected_memberships, mentions, sources, fail):
+    """Check inherited and collision-safe IDs against one frozen parent run."""
+    keys = {'base_run_id', 'base_snapshot_hash', 'revision_node_ids', 'revision_lineage'}
+    revision = snapshot.get('incremental')
+    if revision is None and not any(key in meta for key in keys):
+        return expected_entities, expected_areas, expected_memberships, {}
+    try:
+        removed = json.loads(meta.get('removed_paper_ids', 'null'))
+    except (ValueError, TypeError):
+        removed = None
+    if (not isinstance(revision, dict) or
+            not isinstance(revision.get('base_snapshot_hash'), str) or
+            not isinstance(revision.get('delta_snapshot_hash'), str) or
+            not isinstance(revision.get('removed_paper_ids'), list) or
+            meta.get('base_snapshot_hash') != revision['base_snapshot_hash'] or
+            meta.get('delta_snapshot_hash') != revision['delta_snapshot_hash'] or
+            removed != revision['removed_paper_ids']):
+        fail('invalid_revision_snapshot_binding')
+        return expected_entities, expected_areas, expected_memberships, {}
+    base_run_id = meta.get('base_run_id')
+    if not isinstance(base_run_id, str) or not base_run_id.strip() or base_run_id == current_run_id:
+        fail('invalid_revision_base_run_id')
+        return expected_entities, expected_areas, expected_memberships, {}
+    try:
+        node_ids = json.loads(meta['revision_node_ids'])
+        lineage = json.loads(meta['revision_lineage'])
+    except (KeyError, ValueError, TypeError):
+        fail('invalid_revision_metadata')
+        return expected_entities, expected_areas, expected_memberships, {}
+    if (not isinstance(node_ids, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in node_ids.items())
+            or not isinstance(lineage, dict)):
+        fail('invalid_revision_metadata')
+        return expected_entities, expected_areas, expected_memberships, {}
+
+    # The parent and child are inspected through the caller's one read-only,
+    # repeatable-read transaction. No second connection can race the audit.
+    parent_schema = 'kg_graph_' + hashlib.sha256(base_run_id.encode()).hexdigest()[:24]
+    table = lambda name: sql.SQL('{}.{}').format(sql.Identifier(parent_schema), sql.Identifier(name))
+    bootstrap = graph.execute('SELECT to_regclass(%s) AS relation', (parent_schema + '.schema_bootstrap',)).fetchone()
+    if not bootstrap or bootstrap['relation'] is None:
+        fail('missing_revision_base')
+        return expected_entities, expected_areas, expected_memberships, {}
+    identity = graph.execute(sql.SQL('SELECT run_id,revision,ddl_fingerprint FROM {} WHERE id=1').format(table('schema_bootstrap'))).fetchone()
+    if (not identity or identity['run_id'] != base_run_id or identity['revision'] != SCHEMA_REVISION
+            or identity['ddl_fingerprint'] != SCHEMA_FINGERPRINT):
+        fail('invalid_revision_base_schema')
+        return expected_entities, expected_areas, expected_memberships, {}
+    parent_meta = {r['key']: r['value'] for r in graph.execute(sql.SQL('SELECT key,value FROM {}').format(table('meta')))}
+    parent_model = parent_meta.get('model_id')
+    current_model = meta.get('model_id')
+    vector_models = {row.get('model_id') for row in snapshot.get('vectors', [])}
+    if (parent_meta.get('phase') != 'complete' or parent_meta.get('index_status') != 'verified'
+            or not parent_meta.get('completed_at')
+            or parent_meta.get('graph_policy') != 'domain-v1'
+            or parent_meta.get('member_review_mode') != 'whole-group-v1'
+            or parent_meta.get('snapshot_hash') != meta.get('base_snapshot_hash')
+            or not meta.get('base_snapshot_hash')
+            or (vector_models and (vector_models != {current_model}
+                                   or (parent_model and parent_model != current_model)))):
+        fail('invalid_revision_base_metadata')
+    old_entities = {r['entity_id']: (r['kind'], set()) for r in graph.execute(sql.SQL('SELECT entity_id,kind FROM {}').format(table('entities')))}
+    old_sources = {r['extraction_id']: r['source_hash'] for r in graph.execute(
+        sql.SQL('SELECT extraction_id,source_hash FROM {}').format(table('sources')))}
+    unchanged_mentions = set()
+    for r in graph.execute(sql.SQL('SELECT mention_id,entity_id,mention_hash,extraction_id FROM {} WHERE entity_id IS NOT NULL').format(table('mentions'))):
+        current = mentions.get(r['mention_id'])
+        current_source = sources.get(current['extraction_id']) if current else None
+        if (current and current_source and current['mention_hash'] == r['mention_hash'] and
+                old_sources.get(r['extraction_id']) == current_source['source_hash']):
+            unchanged_mentions.add(r['mention_id'])
+            if r['entity_id'] in old_entities:
+                old_entities[r['entity_id']][1].add(r['mention_id'])
+    old_areas = {r['area_id']: set() for r in graph.execute(sql.SQL('SELECT area_id FROM {}').format(table('research_areas')))}
+    for r in graph.execute(sql.SQL('SELECT area_id,mention_id FROM {}').format(table('research_area_members'))):
+        if r['area_id'] in old_areas and r['mention_id'] in unchanged_mentions:
+            old_areas[r['area_id']].add(r['mention_id'])
+
+    new_entities = {eid: (kind, set(mids)) for eid, (kind, mids) in expected_entities.items()}
+    new_areas = {aid: set() for aid in expected_areas}
+    for aid, mid in expected_memberships: new_areas[aid].add(mid)
+    inherited = {}
+    for category, old, new in (('entities', old_entities, new_entities), ('research_areas', old_areas, new_areas)):
+        new_by_member = defaultdict(set)
+        for new_id, new_value in new.items():
+            kind, mids = new_value if category == 'entities' else ('ResearchArea', new_value)
+            for mid in mids: new_by_member[(kind, mid)].add(new_id)
+        edges = set()
+        old_degree = Counter(); new_degree = Counter()
+        for old_id, old_value in old.items():
+            old_kind, old_mids = old_value if category == 'entities' else ('ResearchArea', old_value)
+            for mid in old_mids:
+                edges.update((old_id, new_id) for new_id in new_by_member[(old_kind, mid)])
+        for old_id, new_id in edges:
+            old_degree[old_id] += 1; new_degree[new_id] += 1
+        for old_id, new_id in edges:
+            if old_degree[old_id] == new_degree[new_id] == 1:
+                inherited[new_id] = old_id
+        expected_edges = [{'old_id': old_id, 'new_id': new_id,
+                           'relation': 'inherited' if inherited.get(new_id) == old_id else 'overlap'}
+                          for old_id, new_id in sorted(edges)]
+        actual_edges = lineage.get(category)
+        if (not isinstance(actual_edges, list) or
+                sorted(json.dumps(e, sort_keys=True) for e in actual_edges) !=
+                sorted(json.dumps(e, sort_keys=True) for e in expected_edges)):
+            fail('revision_lineage_mismatch', category=category)
+    if set(lineage) != {'entities', 'research_areas'}:
+        fail('invalid_revision_lineage_keys')
+    default_ids = set(new_entities) | set(new_areas)
+    if any(k not in default_ids or k == v for k, v in node_ids.items()):
+        fail('invalid_revision_node_mapping')
+    required = {k: v for k, v in inherited.items() if k != v}
+    reserved = set(old_entities) | set(old_areas) | default_ids
+    for default_id in sorted(default_ids):
+        if (default_id in inherited or
+                default_id in new_entities and new_entities[default_id][0] == 'ResearchProblem' or
+                default_id not in old_entities and default_id not in old_areas):
+            continue
+        prefix = default_id.split(':', 1)[0] + ':'
+        counter = 0
+        while True:
+            candidate = prefix + digest(['revision', snapshot['snapshot_hash'], default_id, counter])[:32]
+            if candidate not in reserved:
+                break
+            counter += 1
+        required[default_id] = candidate
+        reserved.add(candidate)
+    if node_ids != required:
+        fail('revision_node_mapping_mismatch')
+    effective_ids = {eid: node_ids.get(eid, eid) for eid in (*new_entities, *new_areas)}
+    if len(set(effective_ids.values())) != len(effective_ids):
+        fail('revision_node_id_collision')
+    mapped_entities = {effective_ids[eid]: value for eid, value in expected_entities.items()}
+    mapped_areas = {effective_ids[aid]: value for aid, value in expected_areas.items()}
+    mapped_memberships = {(effective_ids[aid], mid) for aid, mid in expected_memberships}
+    return mapped_entities, mapped_areas, mapped_memberships, effective_ids
 
 
 def validate_graph(snapshot_path, job_dir, cases=None, model=None, *, run_id=None, database_url=None):
@@ -378,8 +517,11 @@ def _domain_validation(snapshot, job_dir, cases, model, graph, store, meta, ment
             eid='entity:'+digest(['ResearchProblem',[mid]])[:32]
             expected_entities[eid]=('ResearchProblem',[mid])
             expected_assignment[mid]=eid
-        else:
-            eid=expected_assignment.get(mid)
+    expected_entities, expected_areas, expected_memberships, effective_ids = _revision_contract(
+        graph, meta, snapshot, search.run_id, expected_entities, expected_areas,
+        expected_memberships, mentions, sources, fail)
+    for mid,row in mentions.items():
+        eid=effective_ids.get(expected_assignment.get(mid), expected_assignment.get(mid))
         if row['entity_id']!=eid or row['decision']!='new_entity':
             fail('mention_entity_assignment',mention_id=mid,entity_id=row['entity_id'],expected=eid)
         if row['extraction_id'] not in sources:

@@ -9,11 +9,12 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1] / 'src'))
 from kg_builder.snapshot_graph import SnapshotGraph
 
 
-def main(argv=None):
+def main(argv=None, *, emit=True):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--snapshot',required=True,type=Path)
     parser.add_argument('--job-dir',required=True,type=Path)
     parser.add_argument('--run-id',help='Explicit PostgreSQL graph run identity; otherwise reuse/create graph-job.json')
+    parser.add_argument('--base-run-id',help='Completed domain-v1 graph that the incremental snapshot revises')
     parser.add_argument('--k',type=int)
     parser.add_argument('--name-mode',choices=['external','api'])
     parser.add_argument('--graph-policy',choices=['legacy','domain-v1'])
@@ -53,19 +54,22 @@ def main(argv=None):
             from kg_builder.embeddings import create_embedding_model
             model=create_embedding_model(provider=args.embedding_provider or 'fastembed',model_name=args.embedding_model,
                 dimension=args.embedding_dimension,cache_dir=args.embedding_cache_dir,**voyage_options)
+        revision_options={'base_run_id':args.base_run_id} if args.base_run_id is not None else {}
         job=SnapshotGraph(args.snapshot,args.job_dir,client=client,model=model,publisher=publisher,
             voyage_options=voyage_options,k=args.k,name_mode=args.name_mode,run_id=args.run_id,
             batch_size=getattr(args,'batch_size',32),name_concurrency=getattr(args,'name_concurrency',3),
             name_base_url=args.name_base_url,name_model=args.name_model,read_input=args.command=='run',
             embedding_cache_dir=args.embedding_cache_dir,graph_policy=args.graph_policy,
-            problem_resolution=args.problem_resolution,entity_same_min_probability=args.entity_same_min_probability)
+            problem_resolution=args.problem_resolution,entity_same_min_probability=args.entity_same_min_probability,
+            **revision_options)
         if args.command=='run':result=job.run()
         elif args.command=='claim':
             result=job.claim(args.worker,args.limit)
             args.output.write_text(json.dumps(result,indent=2,ensure_ascii=False),encoding='utf-8')
         elif args.command=='submit':result=job.submit(json.loads(args.input.read_text(encoding='utf-8')))
         else:result=job.status()
-        print(json.dumps(result,indent=2,ensure_ascii=False))
+        if emit:print(json.dumps(result,indent=2,ensure_ascii=False))
+        return result
     finally:
         try:
             if job is not None:
