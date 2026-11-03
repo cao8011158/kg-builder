@@ -1,0 +1,33 @@
+{
+  "results": [
+    {
+      "entity_id": "benchmark:locomo",
+      "kind": "Benchmark",
+      "name": "LoCoMo",
+      "description": "Long-conversation memory and question-answering benchmark.",
+      "score": 0.0819672131147541,
+      "papers": [
+        {
+          "paper_id": "arxiv:2502.12110",
+          "title": "A-Mem: Agentic Memory for LLM Agents",
+          "version_id": "arxiv:2502.12110@v1",
+          "source_url": "https://arxiv.org/html/2502.12110v1"
+        },
+        {
+          "paper_id": "arxiv:2504.19413",
+          "title": "Mem0: Building Production-Ready AI Agents with Scalable Long-Term Memory",
+          "version_id": "arxiv:2504.19413@v1",
+          "source_url": "https://arxiv.org/html/2504.19413v1"
+        },
+        {
+          "paper_id": "arxiv:2602.02474",
+          "title": "MemSkill: Learning and Evolving Memory Skills for Self-Evolving Agents",
+          "version_id": "arxiv:2602.02474@v1",
+          "source_url": "https://arxiv.org/html/2602.02474v1"
+        }
+      ],
+      "papers_truncated": false
+    }
+  ],
+  "next_offset": 1
+}

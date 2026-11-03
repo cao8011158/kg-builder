@@ -1,0 +1,95 @@
+{
+  "structural": {
+    "passed": true,
+    "failure_counts": {},
+    "failure_total": 0,
+    "details": [],
+    "details_truncated": false,
+    "coverage": {
+      "approved_items": 346,
+      "sources": 46,
+      "mentions": 229,
+      "contributions": 117,
+      "entities": 211,
+      "research_areas": 1,
+      "area_memberships": 57,
+      "excluded_memberships": 0,
+      "member_reviews": 227,
+      "accepted_groups": 155,
+      "pending_groups": 0,
+      "pending_pairs": 28,
+      "pending_mentions": 0,
+      "all_source_nodes_available": true
+    },
+    "complete_resolution": false
+  },
+  "quality": {
+    "status": "evaluated",
+    "query_cases": 15,
+    "labeled_positive_queries": 15,
+    "hit_at_5": 1.0,
+    "mrr": 0.83,
+    "identity": {
+      "resolved": 19,
+      "wrong": 3,
+      "pending": 0,
+      "unknown_unscored": 5,
+      "not_applicable_new_semantics": 3,
+      "by_kind": {
+        "Method": {
+          "resolved": 7,
+          "wrong": 0,
+          "pending": 0,
+          "unknown_unscored": 1
+        },
+        "Benchmark": {
+          "resolved": 12,
+          "wrong": 3,
+          "pending": 0,
+          "unknown_unscored": 2
+        }
+      }
+    },
+    "research_area_queries": {
+      "query_cases": 0,
+      "labeled_positive_queries": 0,
+      "hit_at_5": null,
+      "mrr": null
+    }
+  },
+  "matched_MB_identity_before": {
+    "pending": 15,
+    "correct": 7,
+    "unknown_unscored": 3
+  },
+  "matched_MB_identity_after": {
+    "correct": 19,
+    "wrong": 3,
+    "unknown_unscored": 3
+  },
+  "queries_by_kind": {
+    "ResearchProblem": {
+      "old_hit_at_5": 2,
+      "new_hit_at_5": 5,
+      "total": 5
+    },
+    "Method": {
+      "old_hit_at_5": 5,
+      "new_hit_at_5": 5,
+      "total": 5
+    },
+    "Benchmark": {
+      "old_hit_at_5": 1,
+      "new_hit_at_5": 5,
+      "total": 5
+    }
+  },
+  "areas": [
+    {
+      "name": "Reliable memory, context and skill adaptation for long-running LLM agents",
+      "members": 57
+    }
+  ],
+  "excluded": 0,
+  "validation_seconds": 1.4420943580007588
+}

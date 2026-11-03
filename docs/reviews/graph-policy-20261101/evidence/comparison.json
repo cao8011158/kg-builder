@@ -1,0 +1,1195 @@
+{
+  "validation_seconds": 1.4420943580007588,
+  "diagnostic_seconds": 0.5676445009994495,
+  "baseline_identity_same_MB_cases": {
+    "pending": 15,
+    "correct": 7,
+    "unknown_unscored": 3
+  },
+  "new_identity_same_MB_cases": {
+    "correct": 19,
+    "wrong": 3,
+    "unknown_unscored": 3
+  },
+  "identity_cases": [
+    {
+      "id": "i01",
+      "kind": "Benchmark",
+      "expected": "same",
+      "outcome": "correct",
+      "left_name": "ALFWorld",
+      "right_name": "ALFWorld",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i02",
+      "kind": "Benchmark",
+      "expected": "same",
+      "outcome": "correct",
+      "left_name": "WebShop",
+      "right_name": "WebShop",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i03",
+      "kind": "Benchmark",
+      "expected": "same",
+      "outcome": "correct",
+      "left_name": "ALFWorld",
+      "right_name": "ALFWorld",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i04",
+      "kind": "Benchmark",
+      "expected": "same",
+      "outcome": "correct",
+      "left_name": "AppWorld",
+      "right_name": "AppWorld",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i05",
+      "kind": "Benchmark",
+      "expected": "same",
+      "outcome": "correct",
+      "left_name": "AppWorld",
+      "right_name": "AppWorld",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i06",
+      "kind": "Benchmark",
+      "expected": "same",
+      "outcome": "correct",
+      "left_name": "LoCoMo",
+      "right_name": "LoCoMo",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i07",
+      "kind": "Benchmark",
+      "expected": "same",
+      "outcome": "wrong",
+      "left_name": "MemGallery",
+      "right_name": "MemGallery",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i08",
+      "kind": "Benchmark",
+      "expected": "same",
+      "outcome": "wrong",
+      "left_name": "LongMemEval-S",
+      "right_name": "LongMemEval-S",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i09",
+      "kind": "Benchmark",
+      "expected": "same",
+      "outcome": "wrong",
+      "left_name": "SWE-bench Verified",
+      "right_name": "SWE-bench Verified",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i10",
+      "kind": "Benchmark",
+      "expected": "same",
+      "outcome": "correct",
+      "left_name": "SkillShift-Bench",
+      "right_name": "SkillShift-Bench",
+      "duplicate_record_control": true
+    },
+    {
+      "id": "i11",
+      "kind": "Method",
+      "expected": "same",
+      "outcome": "correct",
+      "left_name": "Three-dimensional context-compression taxonomy",
+      "right_name": "Three-dimensional context-compression taxonomy",
+      "duplicate_record_control": true
+    },
+    {
+      "id": "i12",
+      "kind": "ResearchProblem",
+      "expected": "same",
+      "outcome": "not_applicable_new_semantics",
+      "left_name": "Reliable agent trajectory compression",
+      "right_name": "Reliable agent trajectory compression",
+      "duplicate_record_control": true
+    },
+    {
+      "id": "i13",
+      "kind": "Method",
+      "expected": "same",
+      "outcome": "correct",
+      "left_name": "dynamic-regret analysis",
+      "right_name": "dynamic-regret analysis",
+      "duplicate_record_control": true
+    },
+    {
+      "id": "i14",
+      "kind": "ResearchProblem",
+      "expected": "unknown",
+      "outcome": "not_applicable_new_semantics",
+      "left_name": "Coupled skill evolution",
+      "right_name": "Decoupled skill evolution and policy optimization",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i15",
+      "kind": "Benchmark",
+      "expected": "different",
+      "outcome": "correct",
+      "left_name": "AppWorld",
+      "right_name": "WebShop",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i16",
+      "kind": "Benchmark",
+      "expected": "different",
+      "outcome": "correct",
+      "left_name": "ALFWorld",
+      "right_name": "AppWorld",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i17",
+      "kind": "Benchmark",
+      "expected": "different",
+      "outcome": "correct",
+      "left_name": "LoCoMo",
+      "right_name": "MemGallery",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i18",
+      "kind": "Benchmark",
+      "expected": "different",
+      "outcome": "correct",
+      "left_name": "SkillShift-Bench",
+      "right_name": "WebShop",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i19",
+      "kind": "Benchmark",
+      "expected": "different",
+      "outcome": "correct",
+      "left_name": "RSE-Bench",
+      "right_name": "SkillShift-Bench",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i20",
+      "kind": "Method",
+      "expected": "different",
+      "outcome": "correct",
+      "left_name": "Focus",
+      "right_name": "FOCUS",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i21",
+      "kind": "Method",
+      "expected": "different",
+      "outcome": "correct",
+      "left_name": "TRACE",
+      "right_name": "PAIR (Prompt Adaptation using Interventional Rollouts)",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i22",
+      "kind": "Method",
+      "expected": "different",
+      "outcome": "correct",
+      "left_name": "Skill1",
+      "right_name": "SkillRise",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i23",
+      "kind": "Method",
+      "expected": "different",
+      "outcome": "correct",
+      "left_name": "MemFit",
+      "right_name": "TrawMem",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i24",
+      "kind": "ResearchProblem",
+      "expected": "different",
+      "outcome": "not_applicable_new_semantics",
+      "left_name": "Memory tax",
+      "right_name": "Memory Echo",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i25",
+      "kind": "Benchmark",
+      "expected": "unknown",
+      "outcome": "unknown_unscored",
+      "left_name": "LongMemEval",
+      "right_name": "LongMemEval-S",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i26",
+      "kind": "Benchmark",
+      "expected": "unknown",
+      "outcome": "unknown_unscored",
+      "left_name": "SWE-bench Lite",
+      "right_name": "SWE-bench Verified",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i27",
+      "kind": "Method",
+      "expected": "unknown",
+      "outcome": "unknown_unscored",
+      "left_name": "A-Mem",
+      "right_name": "A-MEM",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i28",
+      "kind": "ResearchProblem",
+      "expected": "same",
+      "outcome": "not_applicable_new_semantics",
+      "left_name": "Agent context bloat",
+      "right_name": "Long agent histories",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i29",
+      "kind": "ResearchProblem",
+      "expected": "unknown",
+      "outcome": "not_applicable_new_semantics",
+      "left_name": "Execution instability after context compression",
+      "right_name": "Compression event attribution",
+      "duplicate_record_control": false
+    },
+    {
+      "id": "i30",
+      "kind": "Method",
+      "expected": "different",
+      "outcome": "correct",
+      "left_name": "compressor distillation",
+      "right_name": "Multi-path retrieval with cross-encoder reranking",
+      "duplicate_record_control": false
+    }
+  ],
+  "query_cases": [
+    {
+      "id": "q01",
+      "kind": "ResearchProblem",
+      "query": "How can an agent keep long task histories from inflating inference costs and distracting its reasoning?",
+      "old_rank": null,
+      "new_rank": 1,
+      "top5": [
+        {
+          "rank": 1,
+          "name": "Long-horizon context bloat",
+          "entity_id": "entity:2e9673cb4c2d6a096203cdd19af220f2",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 2,
+          "name": "Reasoning-history growth",
+          "entity_id": "entity:dd70838f75f2fa4bf7f75ff868747b02",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 3,
+          "name": "Long agent histories",
+          "entity_id": "entity:378a0f07b8a3eeb8b5994b726abcf666",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 4,
+          "name": "Agent context bloat",
+          "entity_id": "entity:29b14032f55d6cd416898e4d3cc0977d",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 5,
+          "name": "Temporally valid repository memory evaluation",
+          "entity_id": "entity:c69ae16389b68c0070676fa83f1cc772",
+          "expected_paper_hit": false
+        }
+      ]
+    },
+    {
+      "id": "q02",
+      "kind": "ResearchProblem",
+      "query": "What goes wrong when an agent resumes execution after its context has been summarized?",
+      "old_rank": 1,
+      "new_rank": 2,
+      "top5": [
+        {
+          "rank": 1,
+          "name": "Recovery after denied actions",
+          "entity_id": "entity:b5f205c4633a44a6695531ca7c6f7b50",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 2,
+          "name": "Execution instability after context compression",
+          "entity_id": "entity:d5440c39bb19c7a0fce8cab2c745a03d",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 3,
+          "name": "Conversation history beyond context window",
+          "entity_id": "entity:4b06e14e013ee41e265ba3bac2e0022d",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 4,
+          "name": "Subtask-aware context for coding agents",
+          "entity_id": "entity:2a5487629343bbf0f4135da6642c23fd",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 5,
+          "name": "Memory applicability",
+          "entity_id": "entity:dd5ee9b778b4d0b5ac0e564aa39dfcf3",
+          "expected_paper_hit": false
+        }
+      ]
+    },
+    {
+      "id": "q03",
+      "kind": "ResearchProblem",
+      "query": "How can reusable agent skills transfer across related tasks instead of being relearned for each episode?",
+      "old_rank": 1,
+      "new_rank": 1,
+      "top5": [
+        {
+          "rank": 1,
+          "name": "Cross-task skill transfer",
+          "entity_id": "entity:922afd50e373093a263c2387f5228ed4",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 2,
+          "name": "Unreliable accumulated agent knowledge",
+          "entity_id": "entity:707fd958ce0d2975a6a1cb5a271e3600",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 3,
+          "name": "Generalizable coding skills",
+          "entity_id": "entity:2377106df31aaa8ad7aedb133d3d54dd",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 4,
+          "name": "Decoupled skill evolution and policy optimization",
+          "entity_id": "entity:3a52118933a7bb2ac5813fc9be1f1919",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 5,
+          "name": "Coupled skill evolution",
+          "entity_id": "entity:bd317954e5ad2981084c7aa89918a141",
+          "expected_paper_hit": false
+        }
+      ]
+    },
+    {
+      "id": "q04",
+      "kind": "ResearchProblem",
+      "query": "How should a memory system handle answers when obsolete facts compete with newer updates?",
+      "old_rank": null,
+      "new_rank": 2,
+      "top5": [
+        {
+          "rank": 1,
+          "name": "Memory tax",
+          "entity_id": "entity:1638a739427c4975cd302bea58a1495f",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 2,
+          "name": "Obsolete fact interference",
+          "entity_id": "entity:44722592965b2952199e79abf8d08311",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 3,
+          "name": "Correction-resistant historical memory",
+          "entity_id": "entity:945514e2d4d7d02c0616be1a287b396b",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 4,
+          "name": "Temporally valid repository memory evaluation",
+          "entity_id": "entity:c69ae16389b68c0070676fa83f1cc772",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 5,
+          "name": "Persistent relational agent memory",
+          "entity_id": "entity:78b9914787843dae75ff056e45496c6c",
+          "expected_paper_hit": false
+        }
+      ]
+    },
+    {
+      "id": "q05",
+      "kind": "ResearchProblem",
+      "query": "How do learned web agent skills cope when the site changes the context, perception, or available actions?",
+      "old_rank": null,
+      "new_rank": 1,
+      "top5": [
+        {
+          "rank": 1,
+          "name": "Skill robustness under web environment evolution",
+          "entity_id": "entity:4fbb9816c20bbb6ae839606259266617",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 2,
+          "name": "Skill failure under evolving web environments",
+          "entity_id": "entity:ff7ad19ba4d6a198ac08a14fd1a18abf",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 3,
+          "name": "Agent context bloat",
+          "entity_id": "entity:29b14032f55d6cd416898e4d3cc0977d",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 4,
+          "name": "Agent social re-entry",
+          "entity_id": "entity:7dafd2e5c68ebbf63b6da363f6480fb4",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 5,
+          "name": "Decoupled skill evolution and policy optimization",
+          "entity_id": "entity:3a52118933a7bb2ac5813fc9be1f1919",
+          "expected_paper_hit": false
+        }
+      ]
+    },
+    {
+      "id": "q06",
+      "kind": "Method",
+      "query": "Which approach lets an agent decide when to consolidate key lessons and prune raw history?",
+      "old_rank": 5,
+      "new_rank": 5,
+      "top5": [
+        {
+          "rank": 1,
+          "name": "KEEL (Knowledge Evolution from Expertise and Lessons)",
+          "entity_id": "entity:93f063228ecd847ac637bffd78dbcc3b",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 2,
+          "name": "Representation probing and activation patching",
+          "entity_id": "entity:7d87b09c15624251651316319d7741c0",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 3,
+          "name": "ACON (Agent Context Optimization)",
+          "entity_id": "entity:28d64c75f560b87711fdb03d70b98e71",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 4,
+          "name": "Reasoning Agent",
+          "entity_id": "entity:6af9452aed3c292707a39363203efa7a",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 5,
+          "name": "Focus",
+          "entity_id": "entity:79d3980172afc9195eb5f66e15df5ae2",
+          "expected_paper_hit": true
+        }
+      ]
+    },
+    {
+      "id": "q07",
+      "kind": "Method",
+      "query": "Find a compression technique that compares continuations from the same state to revise a summary prompt after failures.",
+      "old_rank": 1,
+      "new_rank": 1,
+      "top5": [
+        {
+          "rank": 1,
+          "name": "matched counterfactual continuations",
+          "entity_id": "entity:a2222f64b1d55b9db03dcbe80118040e",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 2,
+          "name": "TRACE",
+          "entity_id": "entity:27773aad5af14217d48a343970ade233",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 3,
+          "name": "paired closed-loop continuations",
+          "entity_id": "entity:a35422ad2626c3523cd142c3a7b17c1d",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 4,
+          "name": "PAIR (Prompt Adaptation using Interventional Rollouts)",
+          "entity_id": "entity:97fa6ba10fb2f8b523c36133d683972a",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 5,
+          "name": "Signed-record recovery",
+          "entity_id": "entity:392e8c07999aca964bb7d3ad48833e3f",
+          "expected_paper_hit": false
+        }
+      ]
+    },
+    {
+      "id": "q08",
+      "kind": "Method",
+      "query": "Which memory architecture keeps verbatim turns with cheap insertion and combines lexical and semantic retrieval?",
+      "old_rank": 1,
+      "new_rank": 1,
+      "top5": [
+        {
+          "rank": 1,
+          "name": "MemFit",
+          "entity_id": "entity:1f5fb6976485b75e75296204322f2430",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 2,
+          "name": "Memory consolidation",
+          "entity_id": "entity:50939ded048354749e22271b8d335d14",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 3,
+          "name": "Multi-path retrieval with cross-encoder reranking",
+          "entity_id": "entity:e35962dea0374412ad02fe76261f6a35",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 4,
+          "name": "TensorStore Memory",
+          "entity_id": "entity:fb3ebbca8aeaeb84a639b7f48eeaad77",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 5,
+          "name": "NLM (Neural Long Memory)",
+          "entity_id": "entity:1f9c8b90d84309112157ef0265b3a492",
+          "expected_paper_hit": false
+        }
+      ]
+    },
+    {
+      "id": "q09",
+      "kind": "Method",
+      "query": "What system selects memories as a budgeted slate like a recommender cascade?",
+      "old_rank": 1,
+      "new_rank": 1,
+      "top5": [
+        {
+          "rank": 1,
+          "name": "AgentMemRec",
+          "entity_id": "entity:611fe95275d00322504de62edeb1c27f",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 2,
+          "name": "Zep",
+          "entity_id": "entity:ed99ff047fec9e622ba2d7880e97c51b",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 3,
+          "name": "Mem0",
+          "entity_id": "entity:0dee8df8a2f5f045522e4bfb5a7fedbf",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 4,
+          "name": "A-Mem",
+          "entity_id": "entity:7ecc522ab7520517559285c908a3cb0c",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 5,
+          "name": "Context Memory Adapter",
+          "entity_id": "entity:87377c758f856fbedc4d04ba5aa2334b",
+          "expected_paper_hit": false
+        }
+      ]
+    },
+    {
+      "id": "q10",
+      "kind": "Method",
+      "query": "Find skill learning that assigns credit to later tasks while curating an evolving shared skill document.",
+      "old_rank": 1,
+      "new_rank": 1,
+      "top5": [
+        {
+          "rank": 1,
+          "name": "SkillRise",
+          "entity_id": "entity:02d8df9c17af9c2303d726ce116a4d63",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 2,
+          "name": "KEEL (Knowledge Evolution from Expertise and Lessons)",
+          "entity_id": "entity:93f063228ecd847ac637bffd78dbcc3b",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 3,
+          "name": "A²SE",
+          "entity_id": "entity:9cb2697d61707bea8b8a6167e2473d8c",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 4,
+          "name": "Skill-R1",
+          "entity_id": "entity:e76cacb123792ae5189ce62dfd705a0d",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 5,
+          "name": "Verifier-Guided Skill Learning",
+          "entity_id": "entity:cc1b5ee0bf186184866f052548e20a2a",
+          "expected_paper_hit": false
+        }
+      ]
+    },
+    {
+      "id": "q11",
+      "kind": "Benchmark",
+      "query": "Which papers evaluate on the web shopping agent benchmark WebShop?",
+      "old_rank": null,
+      "new_rank": 4,
+      "top5": [
+        {
+          "rank": 1,
+          "name": "SkillShift-Bench",
+          "entity_id": "entity:650b1e1673ba209ddac5c24f6e851a74",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 2,
+          "name": "OfficeBench",
+          "entity_id": "entity:f71fe16e5bb081d94b98e268828bdf2d",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 3,
+          "name": "ResearchClawBench",
+          "entity_id": "entity:64eb5ec3ecbe2e8d52aa3108e7a60874",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 4,
+          "name": "ALFWorld",
+          "entity_id": "entity:a511f653d9c50eb90f86423e635df72b",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 5,
+          "name": "WebShop",
+          "entity_id": "entity:ae9afdbe27684dc91c732722f6565782",
+          "expected_paper_hit": true
+        }
+      ]
+    },
+    {
+      "id": "q12",
+      "kind": "Benchmark",
+      "query": "Find agent memory studies reporting results on LoCoMo.",
+      "old_rank": null,
+      "new_rank": 1,
+      "top5": [
+        {
+          "rank": 1,
+          "name": "MemGallery",
+          "entity_id": "entity:be16da3de3cc801281673d3582e23eef",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 2,
+          "name": "LoCoMo",
+          "entity_id": "entity:51874fd5df4fd142970df12d00566dd4",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 3,
+          "name": "MemoryAgentBench",
+          "entity_id": "entity:6ba4cb83672dac5e86cebeb8b8960a57",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 4,
+          "name": "MGBench",
+          "entity_id": "entity:753e2254a38f3cdbaa23ccd251077c4b",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 5,
+          "name": "MemDev-Bench",
+          "entity_id": "entity:12516490e2b3ef1ecb83b86321754683",
+          "expected_paper_hit": false
+        }
+      ]
+    },
+    {
+      "id": "q13",
+      "kind": "Benchmark",
+      "query": "Where was the AppWorld benchmark used to assess compression or agent workflow quality?",
+      "old_rank": null,
+      "new_rank": 1,
+      "top5": [
+        {
+          "rank": 1,
+          "name": "AppWorld",
+          "entity_id": "entity:34a1d14fd7457bd33ac416fa60c5b8b0",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 2,
+          "name": "ALFWorld",
+          "entity_id": "entity:a511f653d9c50eb90f86423e635df72b",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 3,
+          "name": "ProgramBench",
+          "entity_id": "entity:efb127c420d30a8bf3eeb45bd039e3ff",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 4,
+          "name": "SWE-Milestone",
+          "entity_id": "entity:6d2f2a7e03414ed12ddbe4072fe521ec",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 5,
+          "name": "MemGallery",
+          "entity_id": "entity:285cea00f6f478502acee4b0ee832d03",
+          "expected_paper_hit": false
+        }
+      ]
+    },
+    {
+      "id": "q14",
+      "kind": "Benchmark",
+      "query": "What benchmark tests skill use when a web environment shifts during execution?",
+      "old_rank": 1,
+      "new_rank": 1,
+      "top5": [
+        {
+          "rank": 1,
+          "name": "SkillShift-Bench",
+          "entity_id": "entity:650b1e1673ba209ddac5c24f6e851a74",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 2,
+          "name": "SciValidityBench",
+          "entity_id": "entity:66609da11768102950028587354f1cde",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 3,
+          "name": "OfficeBench",
+          "entity_id": "entity:f71fe16e5bb081d94b98e268828bdf2d",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 4,
+          "name": "MatTools",
+          "entity_id": "entity:8c48bef574d74e479d5f70eaa24d74e4",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 5,
+          "name": "ALFWorld",
+          "entity_id": "entity:a511f653d9c50eb90f86423e635df72b",
+          "expected_paper_hit": false
+        }
+      ]
+    },
+    {
+      "id": "q15",
+      "kind": "Benchmark",
+      "query": "Which studies use LongMemEval-S rather than the unsuffixed LongMemEval?",
+      "old_rank": null,
+      "new_rank": 1,
+      "top5": [
+        {
+          "rank": 1,
+          "name": "LongMemEval-S",
+          "entity_id": "entity:47d4f133c6bfc33ba0e530917e131aae",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 2,
+          "name": "LongMemEval-S",
+          "entity_id": "entity:63cf734897460700f1f90c6129ce7256",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 3,
+          "name": "LongMemEval-S",
+          "entity_id": "entity:b665fbe4f015ef2a30acc2fedd39273d",
+          "expected_paper_hit": true
+        },
+        {
+          "rank": 4,
+          "name": "LongMemEval",
+          "entity_id": "entity:f3beec25b17d3c850735e77576777e7f",
+          "expected_paper_hit": false
+        },
+        {
+          "rank": 5,
+          "name": "MemGallery",
+          "entity_id": "entity:285cea00f6f478502acee4b0ee832d03",
+          "expected_paper_hit": true
+        }
+      ]
+    }
+  ],
+  "queries_by_kind": {
+    "ResearchProblem": {
+      "old_hit_at_5": 2,
+      "new_hit_at_5": 5,
+      "total": 5
+    },
+    "Method": {
+      "old_hit_at_5": 5,
+      "new_hit_at_5": 5,
+      "total": 5
+    },
+    "Benchmark": {
+      "old_hit_at_5": 1,
+      "new_hit_at_5": 5,
+      "total": 5
+    }
+  },
+  "areas": [
+    {
+      "area_id": "area:577c233da9707f3a141a27cbb561cfda",
+      "name": "Reliable memory, context and skill adaptation for long-running LLM agents",
+      "description": "Research on how long-running language-model agents preserve, retrieve, compress, validate and update conversational or task experience and reusable procedural skills across episodes and changing environments. The area covers downstream decision quality and evaluation, computational and context costs, temporal validity and applicability, provenance and security, privacy, and interference between historical knowledge or tasks. Its members address related but distinct research problems; membership does not assert that their concrete objectives or failure modes are identical.",
+      "revision": "c0c44b875f4cfa6f846a7752a1d0653cc2a19b5125a8f531496932fb787d415e",
+      "retained_member_count": 57,
+      "members": [
+        {
+          "name": "Agent context bloat",
+          "description": "Long software engineering interaction histories inflate computation and latency and distract reasoning, while passive summarization leaves the agent unable to control memory management.",
+          "paper_id": "arxiv:2601.07190"
+        },
+        {
+          "name": "Agent social re-entry",
+          "description": "Agents in persistent social environments may remember past conversations yet fail to identify when to revisit them, choose to return, or reconstruct enough context for coherent continuation.",
+          "paper_id": "arxiv:2610.39781"
+        },
+        {
+          "name": "Compression event attribution",
+          "description": "Full-context versus compressed trajectory comparisons are confounded by agent stochasticity and cannot identify which individual compression degrades downstream execution.",
+          "paper_id": "arxiv:2609.36526"
+        },
+        {
+          "name": "Conversation history beyond context window",
+          "description": "Conversational agents lose older dialogue when context exceeds the window, requiring retrieval or truncation.",
+          "paper_id": "doi:10.5281/zenodo.21964737"
+        },
+        {
+          "name": "Correction-resistant historical memory",
+          "description": "Same-source record accumulation and persistence after corrections can let historical claims govern current answers.",
+          "paper_id": "arxiv:2610.17763"
+        },
+        {
+          "name": "Costly memory writes",
+          "description": "Existing agent memory systems use LLMs to organize and consolidate memories, making memory construction costly and slow; compression may also discard surface-level details.",
+          "paper_id": "arxiv:2610.00872"
+        },
+        {
+          "name": "Coupled skill evolution",
+          "description": "Training selection, use, and distillation separately or with different rewards causes partial or conflicting evolution of an agent skill library.",
+          "paper_id": "arxiv:2605.06130"
+        },
+        {
+          "name": "Cross-task skill transfer",
+          "description": "Independent-episode agentic reinforcement learning misses reusable patterns between related distinct tasks; multi-stage skill pipelines entangle extraction, retrieval and execution and add overhead.",
+          "paper_id": "arxiv:2607.26784"
+        },
+        {
+          "name": "Decision-preserving progress compression",
+          "description": "A compressed progress representation may lose information needed to choose between restart and continue even if trace reconstruction looks adequate.",
+          "paper_id": "arxiv:2610.36544"
+        },
+        {
+          "name": "Decoupled skill evolution and policy optimization",
+          "description": "Fixed meta-skill workflows or separate optimization treat skills as passive and limit their co-adaptation with a reasoning agent.",
+          "paper_id": "arxiv:2609.04865"
+        },
+        {
+          "name": "Evolving repository-specific skills",
+          "description": "Code structure and conventions change over time; new PRs must update related components coherently and maintain tests, requiring skills to learn from past validated changes.",
+          "paper_id": "arxiv:2610.36188"
+        },
+        {
+          "name": "Execution instability after context compression",
+          "description": "Recurrent compression may suppress relevant recent interactions, leading to blocked actions and repeated exploration, while effects of individual compactions are poorly understood.",
+          "paper_id": "arxiv:2608.06503"
+        },
+        {
+          "name": "Generalizable coding skills",
+          "description": "Coding trajectories entangle procedural knowledge with task and repository context, making transfer across diverse coding environments difficult.",
+          "paper_id": "arxiv:2610.35616"
+        },
+        {
+          "name": "Heterogeneous experience retention",
+          "description": "One global history is expensive and mixes unrelated experiences, while one compressed representation may discard valuable details; future usefulness of experience is unknown.",
+          "paper_id": "arxiv:2610.38796"
+        },
+        {
+          "name": "Ill-scoped multi-agent adaptation",
+          "description": "Agents in specialized domains need task procedures; unstructured multi-agent evolution lets the backbone decide update scope and can lead to cross-task interference and inconsistent structures.",
+          "paper_id": "arxiv:2610.35966"
+        },
+        {
+          "name": "Information Entanglement",
+          "description": "Heterogeneous conversational information is mixed into coarse-grained memory units.",
+          "paper_id": "arxiv:2610.37443"
+        },
+        {
+          "name": "Local memory management",
+          "description": "Memory systems relying on large or API-hosted memory managers prevent private local deployment; it is unclear how small a local model can manage long-term memory.",
+          "paper_id": "doi:10.5281/zenodo.21964737"
+        },
+        {
+          "name": "Long agent histories",
+          "description": "Growing interaction histories increase inference cost and dilute attention, degrading performance.",
+          "paper_id": "arxiv:2609.37590"
+        },
+        {
+          "name": "Long-horizon context bloat",
+          "description": "Growing agent histories raise inference memory cost and degrade reasoning through irrelevant information; heuristic or parameter-update compression is brittle or impractical for some models.",
+          "paper_id": "arxiv:2510.00615"
+        },
+        {
+          "name": "Long-horizon dialogue recall",
+          "description": "Dialogue agents need to recall facts, events, and relationships across interaction histories efficiently.",
+          "paper_id": "arxiv:2610.39790"
+        },
+        {
+          "name": "Long-lived memory poisoning",
+          "description": "Untrusted stored documents can later steer an LLM agent to an attacker-selected consequential action, such as a payment destination; authorization must survive permitted changes to memory.",
+          "paper_id": "doi:10.66977/xsci.2610.001o"
+        },
+        {
+          "name": "Long-running materials agent workflows",
+          "description": "Materials research spans dispersed knowledge and tools over multi-day studies; agents struggle to extend capabilities, track long tasks, and learn from prior tasks and feedback.",
+          "paper_id": "arxiv:2610.34203"
+        },
+        {
+          "name": "Lost process information",
+          "description": "Compressed memories can omit historical process details that reduce agent steps.",
+          "paper_id": "arxiv:2610.27524"
+        },
+        {
+          "name": "Memory Echo",
+          "description": "Repeated retrieval and write-back can multiply positions occupied by a single historical claim, influencing current answers without independent evidence.",
+          "paper_id": "arxiv:2610.17763"
+        },
+        {
+          "name": "Memory applicability",
+          "description": "Reusing earlier experience without reassessing its relevance can make otherwise solvable code tasks fail.",
+          "paper_id": "arxiv:2610.27524"
+        },
+        {
+          "name": "Memory governance",
+          "description": "Agentic long-term memory can expose stale, invalidated, cross-scope, contradictory, or failed historical memory as usable context instead of returning useful current context.",
+          "paper_id": "doi:10.5281/zenodo.20793096"
+        },
+        {
+          "name": "Memory tax",
+          "description": "Reorganizing facts or distilling preferences in a memory process can remove or obscure evidence and degrade performance compared with raw-history retrieval.",
+          "paper_id": "arxiv:2610.34073"
+        },
+        {
+          "name": "Moving tool capabilities",
+          "description": "As services evolve, familiar tools disappear or change, alternatives emerge, and agents must discover efficient paths and revise accumulated procedural knowledge.",
+          "paper_id": "arxiv:2610.34238"
+        },
+        {
+          "name": "Net value of agent memory",
+          "description": "It remains unclear whether building dedicated memory improves long-horizon agent performance over direct retrieval from raw history.",
+          "paper_id": "arxiv:2610.34073"
+        },
+        {
+          "name": "Noise during skill self-evolution",
+          "description": "Errors in learning experience can persist in reusable skills and harm later held-out tasks; existing evaluation emphasizes clean learning or perturbations only after skills are frozen.",
+          "paper_id": "arxiv:2610.19910"
+        },
+        {
+          "name": "Obsolete fact interference",
+          "description": "An agent can retrieve the newest statement yet answer using an obsolete competing version; combined retrieval and generation scores obscure this failure.",
+          "paper_id": "arxiv:2610.36308"
+        },
+        {
+          "name": "Organizational Mismatch",
+          "description": "Memory structures built mainly from semantic similarity may miss other associations among conversational information.",
+          "paper_id": "arxiv:2610.37443"
+        },
+        {
+          "name": "Persistent relational agent memory",
+          "description": "Finite context windows and retrieval-augmented generation pipelines struggle with relational complexity, incremental updates and computational efficiency over long horizons.",
+          "paper_id": "doi:10.5281/zenodo.21783559"
+        },
+        {
+          "name": "Private personalized cross-user skill evolution",
+          "description": "Isolated user streams lack diversity; sharing raw trajectories harms privacy and a uniform global skill library poorly fits heterogeneous clients.",
+          "paper_id": "arxiv:2606.03143"
+        },
+        {
+          "name": "Reasoning-history growth",
+          "description": "Long-horizon agents accumulate past reasoning, raising context length and inference cost; deleting it can alter later actions and trajectories.",
+          "paper_id": "arxiv:2609.29875"
+        },
+        {
+          "name": "Recurrent skill optimization credit assignment",
+          "description": "A skill must improve current rollout quality and revisions must use verified outcomes to improve subsequent skills; model-level updating is costly or unavailable for closed models.",
+          "paper_id": "arxiv:2605.09359"
+        },
+        {
+          "name": "Reliable agent trajectory compression",
+          "description": "Fixed context budgets constrain long-horizon agents, while heterogeneous observations, reasoning and tool executions require preservation of temporal dependencies, actionable state and structural fidelity; fragmented methods hinder comparison.",
+          "paper_id": "doi:10.18653/2026.emnlp-main.2396"
+        },
+        {
+          "name": "Reliable agent trajectory compression",
+          "description": "Fixed context budgets constrain long-horizon agents, while heterogeneous observations, reasoning and tool executions require preservation of temporal dependencies, actionable state and structural fidelity; fragmented methods hinder comparison.",
+          "paper_id": "doi:10.20944/preprints202605.2065.v1"
+        },
+        {
+          "name": "Repeated uncertain skill interpretation",
+          "description": "Textual skill documents are repeatedly interpreted and regenerated through LLM reasoning even for previously learned procedures, adding execution uncertainty.",
+          "paper_id": "arxiv:2610.39508"
+        },
+        {
+          "name": "Restart decision value",
+          "description": "Classification accuracy alone cannot tell whether restarting an agent improves success because replacement opportunity and remaining budget matter.",
+          "paper_id": "arxiv:2610.36544"
+        },
+        {
+          "name": "Role-aware memory selection",
+          "description": "Relevance-only retrieval overlooks memories that link complementary but semantically weaker information needed to solve a task, and the role of a memory changes across tasks.",
+          "paper_id": "arxiv:2610.36918"
+        },
+        {
+          "name": "Scientific use validity",
+          "description": "Correctly recalled scientific evidence may be ineligible to support a decision because the outcome or stopping rule was chosen after inspection; retrieval-focused memory tests do not assess this validity.",
+          "paper_id": "arxiv:2610.34767"
+        },
+        {
+          "name": "Separate long- and short-term memory control",
+          "description": "Finite context windows limit long-horizon reasoning, while separately managed LTM and STM with heuristics or auxiliary controllers limit adaptability and end-to-end optimization.",
+          "paper_id": "doi:10.18653/v1/2026.acl-long.981"
+        },
+        {
+          "name": "Similarity-only memory retrieval",
+          "description": "Standard RAG retrieves memories by semantic similarity alone, overlooking creation time, access frequency, and factual specificity.",
+          "paper_id": "doi:10.5281/zenodo.19598678"
+        },
+        {
+          "name": "Skill extraction supervision",
+          "description": "Candidate skill text lacks direct supervision for usefulness in actual task solving.",
+          "paper_id": "arxiv:2606.04815"
+        },
+        {
+          "name": "Skill failure under evolving web environments",
+          "description": "Closed-environment evaluation misses changes to skill invocation context, perception, and execution feasibility encountered during web deployment.",
+          "paper_id": "arxiv:2610.33528"
+        },
+        {
+          "name": "Skill robustness under web environment evolution",
+          "description": "Learned skills evaluated in closed environments may fail when invocation context, perceptual grounding, or execution feasibility shifts in deployment.",
+          "paper_id": "doi:10.18653/2026.emnlp-main.1952"
+        },
+        {
+          "name": "Snapshot-only memory provenance",
+          "description": "Memory-backed agents need attribution after snapshots leak or migrate when logs, visible outputs, and trusted metadata may be unavailable.",
+          "paper_id": "doi:10.18653/2026.findings-emnlp.395"
+        },
+        {
+          "name": "Sparse rewards for memory actions",
+          "description": "Memory operations induce sparse and discontinuous rewards during training.",
+          "paper_id": "doi:10.18653/v1/2026.acl-long.981"
+        },
+        {
+          "name": "Static test-time policy",
+          "description": "Agents depending on skill or experience retrieval with fixed inference parameters cannot continuously internalize feedback and may accrue context bloat.",
+          "paper_id": "arxiv:2606.04815"
+        },
+        {
+          "name": "Subtask-aware context for coding agents",
+          "description": "Sequential histories inflate context; trimming without subtask boundaries risks losing unfinished work, while delegating every nested subtask adds execution and coordination overhead.",
+          "paper_id": "arxiv:2610.37224"
+        },
+        {
+          "name": "Temporal grounding under compression",
+          "description": "Smaller memory extractors may fail to preserve dates needed for temporal reasoning.",
+          "paper_id": "doi:10.5281/zenodo.21964737"
+        },
+        {
+          "name": "Temporally valid repository memory evaluation",
+          "description": "Existing code-agent benchmarks lack temporally valid histories or control over how relevant earlier tasks are.",
+          "paper_id": "arxiv:2610.27524"
+        },
+        {
+          "name": "Test-time compression",
+          "description": "Offline-trained compression policies impose collection or training cost and do not adapt to evolving test-time trajectories.",
+          "paper_id": "arxiv:2609.37590"
+        },
+        {
+          "name": "Undirected skill updates",
+          "description": "Existing skill banks can be updated without direction or verification, and agents are penalized prematurely for failing to use immature skills.",
+          "paper_id": "doi:10.18653/2026.findings-emnlp.136"
+        },
+        {
+          "name": "Unreliable accumulated agent knowledge",
+          "description": "Memories and skills automatically derived from trajectories can carry errors across related tasks and corrupt otherwise useful knowledge without ongoing validation.",
+          "paper_id": "arxiv:2610.34043"
+        },
+        {
+          "name": "Watermark robustness and utility",
+          "description": "Attribution must withstand memory-lifecycle attacks and retain useful memory behavior without relying on mutable provenance fields.",
+          "paper_id": "doi:10.18653/2026.findings-emnlp.395"
+        }
+      ],
+      "name_lookup_rank": 1,
+      "detail_member_count": 57
+    }
+  ],
+  "excluded_members": [],
+  "limits": [
+    "Same frozen15 source proxy queries; not human gold",
+    "Original research problems are distinct nodes; 5 old RP identity cases are not compared as entity resolution",
+    "Area exact-name lookup is a functionality smoke test, not semantic quality accuracy",
+    "Jev is live and nondeterministic; identity changes are not purely a controlled policy replay"
+  ]
+}

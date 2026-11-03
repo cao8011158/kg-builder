@@ -1,0 +1,63 @@
+{
+  "schema_version": "research-kg-graph-acceptance/1",
+  "graph_policy": "domain-v1",
+  "snapshot_hash": "65015c638bb028e74139e248abdfbb391fb8875f3beddb0d5fc47229c4700b41",
+  "structural": {
+    "passed": true,
+    "failure_counts": {},
+    "failure_total": 0,
+    "details": [],
+    "details_truncated": false,
+    "coverage": {
+      "approved_items": 346,
+      "sources": 46,
+      "mentions": 229,
+      "contributions": 117,
+      "entities": 211,
+      "research_areas": 1,
+      "area_memberships": 57,
+      "excluded_memberships": 0,
+      "member_reviews": 227,
+      "accepted_groups": 155,
+      "pending_groups": 0,
+      "pending_pairs": 28,
+      "pending_mentions": 0,
+      "all_source_nodes_available": true
+    },
+    "complete_resolution": false
+  },
+  "quality": {
+    "status": "evaluated",
+    "query_cases": 15,
+    "labeled_positive_queries": 15,
+    "hit_at_5": 1.0,
+    "mrr": 0.83,
+    "identity": {
+      "resolved": 19,
+      "wrong": 3,
+      "pending": 0,
+      "unknown_unscored": 5,
+      "not_applicable_new_semantics": 3,
+      "by_kind": {
+        "Method": {
+          "resolved": 7,
+          "wrong": 0,
+          "pending": 0,
+          "unknown_unscored": 1
+        },
+        "Benchmark": {
+          "resolved": 12,
+          "wrong": 3,
+          "pending": 0,
+          "unknown_unscored": 2
+        }
+      }
+    },
+    "research_area_queries": {
+      "query_cases": 0,
+      "labeled_positive_queries": 0,
+      "hit_at_5": null,
+      "mrr": null
+    }
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "identity_mismatches": [
+    {
+      "id": "i07",
+      "kind": "Benchmark",
+      "expected": "same",
+      "outcome": "wrong",
+      "left_name": "MemGallery",
+      "right_name": "MemGallery",
+      "duplicate_record_control": false,
+      "actual_same": false,
+      "pair_decision": "pending",
+      "pair_answer": {
+        "identity": {
+          "choice": "same",
+          "confidence": 0.24,
+          "probabilities": {
+            "different": 0.13,
+            "insufficient": 0.38,
+            "same": 0.49
+          },
+          "type": "choice"
+        }
+      },
+      "left_description": "Agent-memory evaluation benchmark used in experiments.",
+      "right_description": "Benchmark used to evaluate MemFit in the reported experiments.",
+      "left_version": null,
+      "right_version": null
+    },
+    {
+      "id": "i08",
+      "kind": "Benchmark",
+      "expected": "same",
+      "outcome": "wrong",
+      "left_name": "LongMemEval-S",
+      "right_name": "LongMemEval-S",
+      "duplicate_record_control": false,
+      "actual_same": false,
+      "pair_decision": "pending",
+      "pair_answer": {
+        "identity": {
+          "choice": "same",
+          "confidence": 0.4,
+          "probabilities": {
+            "different": 0.11,
+            "insufficient": 0.29,
+            "same": 0.6
+          },
+          "type": "choice"
+        }
+      },
+      "left_description": "Long-term memory benchmark used in evaluation.",
+      "right_description": "Memory benchmark used in empirical evaluation.",
+      "left_version": null,
+      "right_version": null
+    },
+    {
+      "id": "i09",
+      "kind": "Benchmark",
+      "expected": "same",
+      "outcome": "wrong",
+      "left_name": "SWE-bench Verified",
+      "right_name": "SWE-bench Verified",
+      "duplicate_record_control": false,
+      "actual_same": false,
+      "pair_decision": "not_candidate",
+      "pair_answer": null,
+      "left_description": "Target coding benchmark evaluating HSE-evolved skills.",
+      "right_description": "Nineteen selected SymPy issues supplied the studied agent executions.",
+      "left_version": null,
+      "right_version": null
+    }
+  ],
+  "coarse_area": {
+    "Leiden_cluster_sizes": [
+      57,
+      1,
+      1
+    ],
+    "area_nodes": 1,
+    "parameter_changed": false
+  },
+  "handling": "Reported to user for discussion; no policy/threshold/ID heuristic changed."
+}

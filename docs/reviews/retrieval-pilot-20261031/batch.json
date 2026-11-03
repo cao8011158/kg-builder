@@ -1,0 +1,124 @@
+{
+  "batch_id": "retrieval-pilot-20261031",
+  "step": "minimal-schema-and-small-real-paper-pipeline",
+  "repository": "cao8011158/kg-builder",
+  "branch": "work/retrieval-pilot-20261031",
+  "base_sha": "fc114851d5017aed7c8d5477b58b2ff8dac6bbfa",
+  "head_sha": "8cf48517026e95f27b6ba637c503675fac4c7d4d",
+  "target_head_sha": "fc114851d5017aed7c8d5477b58b2ff8dac6bbfa",
+  "implementation_actor": [
+    "schema_development",
+    "vector_development",
+    "workflow_development"
+  ],
+  "reviewer_actor": "root",
+  "feature_complete": true,
+  "scale_required": true,
+  "merge_authorized": false,
+  "authorization_reference": "User: 好的 请执行; previous messages define scope and first small-paper pipeline.",
+  "tests": [
+    {
+      "role": "developer",
+      "kind": "targeted",
+      "head_sha": "8cf48517026e95f27b6ba637c503675fac4c7d4d",
+      "command_reference": "STAGE_REPORT.md and recorded stage commands",
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/workflow-fix1-targeted.log",
+      "log_sha256": "c654b8556b983a98a84315ac1c33c7add31c1b0054c842e5e3adb17e0a8f2fef"
+    },
+    {
+      "role": "developer",
+      "kind": "fast_regression",
+      "head_sha": "8cf48517026e95f27b6ba637c503675fac4c7d4d",
+      "command_reference": "STAGE_REPORT.md and recorded stage commands",
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/workflow-fix1-regression.log",
+      "log_sha256": "75ca3ae00e646dad2a84a13e277d307ff2d80937257d655e0ee1961d816d79ba"
+    },
+    {
+      "role": "reviewer",
+      "kind": "fast_regression",
+      "head_sha": "8cf48517026e95f27b6ba637c503675fac4c7d4d",
+      "command_reference": "STAGE_REPORT.md and recorded stage commands",
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/workflow-review2.log",
+      "log_sha256": "afe7d09e63a06d431a5abe3f1e4ca0086dde0ef51e6cacdb3077750784fb50e2"
+    },
+    {
+      "role": "reviewer",
+      "kind": "feature_acceptance",
+      "head_sha": "8cf48517026e95f27b6ba637c503675fac4c7d4d",
+      "command_reference": "STAGE_REPORT.md and recorded stage commands",
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/roundtrip-restored-query.log",
+      "log_sha256": "ef74cbdfcd915f17dd863a1f4ed6ac3faa56b5c62d5b5a33cbe60c78cd91019f"
+    },
+    {
+      "role": "reviewer",
+      "kind": "scale",
+      "head_sha": "8cf48517026e95f27b6ba637c503675fac4c7d4d",
+      "command_reference": "STAGE_REPORT.md and recorded stage commands",
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/independent-acceptance.log",
+      "log_sha256": "b39a05d1c4242e4043029f62d551b1489f59fc0f83b8bff7a2da649f5e43bbab"
+    }
+  ],
+  "reviews": [
+    {
+      "round": 1,
+      "head_sha": "96b61e8ab2df74483d6e38acd928f7e54f2a8426",
+      "remote_head_sha": "96b61e8ab2df74483d6e38acd928f7e54f2a8426",
+      "actor": "root",
+      "verdict": "changes_required",
+      "counterexample_note": "SEM-01 missing contribution dense path; SEM-02 exact candidate compared name+description."
+    },
+    {
+      "round": 2,
+      "head_sha": "8cf48517026e95f27b6ba637c503675fac4c7d4d",
+      "remote_head_sha": "8cf48517026e95f27b6ba637c503675fac4c7d4d",
+      "actor": "root",
+      "verdict": "pass",
+      "counterexample_note": "56 tests; actual CPU model, alias and contribution search; source/version preservation; indexed SQLite public detail under unrelated-data expansion; restored installed-wheel query."
+    }
+  ],
+  "findings": [
+    {
+      "id": "SEM-01",
+      "severity": "P2",
+      "confirmed": true,
+      "blocking": false,
+      "state": "resolved",
+      "discovered_in_batch": "retrieval-pilot-20261031",
+      "owner_step": "minimal-schema-and-small-real-paper-pipeline",
+      "owner_batch": "retrieval-pilot-20261031",
+      "origin": "current",
+      "dependency_core": false,
+      "route": "authorized_current_batch_fix"
+    },
+    {
+      "id": "SEM-02",
+      "severity": "P2",
+      "confirmed": true,
+      "blocking": false,
+      "state": "resolved",
+      "discovered_in_batch": "retrieval-pilot-20261031",
+      "owner_step": "minimal-schema-and-small-real-paper-pipeline",
+      "owner_batch": "retrieval-pilot-20261031",
+      "origin": "current",
+      "dependency_core": false,
+      "route": "authorized_current_batch_fix"
+    }
+  ],
+  "limits": [
+    "small real-paper functionality pilot, not full corpus or retrieval benchmark",
+    "record pagination has no strict byte budget for an arbitrarily huge requested field",
+    "cold HNSW build is O(N) for the requested kind",
+    "single-writer snapshot workflow; no cross-process hot index coordination"
+  ],
+  "gate_script": "unavailable in current cloud skill; not executed"
+}

@@ -1,0 +1,16 @@
+{
+  "passed": true,
+  "real_api_requests": 0,
+  "original_sample_replays": 0,
+  "original_artifacts_unchanged": 6,
+  "captured_mock_http_requests": 39,
+  "shared_eight_item_body_bytes": 5079,
+  "a20_body_bytes": 17163,
+  "a20_objects": 21,
+  "a20_questions": 20,
+  "unicode_split_requests": 25,
+  "synthetic_preparation_ready": 1,
+  "synthetic_graph_complete": true,
+  "validator_passed": true,
+  "saved_resolution": 0.3
+}

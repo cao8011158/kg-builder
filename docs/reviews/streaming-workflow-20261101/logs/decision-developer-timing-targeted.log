@@ -1,0 +1,16 @@
+test_batches_bounded (test_decision_api.DecisionTests.test_batches_bounded) ... ok
+test_every_question_targets_its_own_item_and_field (test_decision_api.DecisionTests.test_every_question_targets_its_own_item_and_field) ... ok
+test_long_field_review_splits_questions (test_decision_api.DecisionTests.test_long_field_review_splits_questions) ... ok
+test_native_request_and_audit (test_decision_api.DecisionTests.test_native_request_and_audit) ... ok
+test_pair_and_group_semantics (test_decision_api.DecisionTests.test_pair_and_group_semantics) ... ok
+test_reject_malformed_answers (test_decision_api.DecisionTests.test_reject_malformed_answers) ... ok
+test_retry_is_bounded_and_audited (test_decision_api.DecisionTests.test_retry_is_bounded_and_audited) ... ok
+test_scope_and_reviews (test_decision_api.DecisionTests.test_scope_and_reviews) ... ok
+test_shared_audit_request_id_and_adaptive_payload_batch (test_decision_api.DecisionTests.test_shared_audit_request_id_and_adaptive_payload_batch) ... ok
+test_pins_and_generic_json (test_extraction_api.ExtractionAPITests.test_pins_and_generic_json) ... ok
+test_requires_pins_and_disabled (test_extraction_api.ExtractionAPITests.test_requires_pins_and_disabled) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 0.012s
+
+OK

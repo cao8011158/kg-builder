@@ -1,0 +1,6 @@
+----------------------------------------------------------------------
+Ran 125 tests in 24.807s
+
+OK
+area_detail_vm cold=(69, 2, 605) warm=(69, 2, 605) unrelated_1000=(69, 2, 605)
+area_search_vm baseline=(207, 0, 400, 'area:memory') unrelated_1000_cold=(18299, 1, 397, 'area:memory') warm=(233, 0, 397, 'area:memory')

@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""Audit a frozen snapshot graph without changing its PostgreSQL graph run."""
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src'))
+from kg_builder.graph_validation import validate_graph
+
+
+def _check_output_path(output, snapshot, job_dir, cases):
+    protected=[snapshot, *(job_dir/name for name in ('graph-job.json','problem-proposal.json','retrieval-index.json'))]
+    if cases is not None:protected.append(cases)
+    target=output.resolve()
+    for source in protected:
+        if target==source.resolve() or (output.exists() and source.exists() and os.path.samefile(output,source)):
+            raise ValueError(f'Output path collides with protected input: {source}')
+
+
+def main(argv=None):
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--snapshot',type=Path,required=True)
+    parser.add_argument('--job-dir',type=Path,required=True)
+    parser.add_argument('--run-id',help='Explicit PostgreSQL graph run identity; otherwise read graph-job.json')
+    parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--cases',type=Path)
+    parser.add_argument('--cache-dir',type=Path)
+    parser.add_argument('--embedding-provider',choices=['fastembed','voyage'])
+    parser.add_argument('--embedding-model')
+    parser.add_argument('--embedding-dimension',type=int,default=1024)
+    parser.add_argument('--voyage-concurrency',type=int,default=8)
+    parser.add_argument('--voyage-rpm',type=int,default=2000)
+    parser.add_argument('--voyage-tpm',type=int,default=3000000)
+    args=parser.parse_args(argv)
+    _check_output_path(args.output,args.snapshot,args.job_dir,args.cases)
+    cases=json.loads(args.cases.read_text(encoding='utf-8')) if args.cases else None
+    model=None
+    voyage_options=dict(max_concurrency=args.voyage_concurrency,
+        requests_per_minute=args.voyage_rpm,tokens_per_minute=args.voyage_tpm)
+    try:
+        if cases and any(q.get('expected_paper_ids') for q in cases.get('queries',[])):
+            from kg_builder.embeddings import create_embedding_model, embedding_model_from_id
+            from kg_builder.snapshot_graph import read_snapshot
+            snapshot,_=read_snapshot(args.snapshot)
+            if args.embedding_provider or args.embedding_model:
+                model=create_embedding_model(provider=args.embedding_provider or 'fastembed',model_name=args.embedding_model,
+                    dimension=args.embedding_dimension,cache_dir=args.cache_dir,**voyage_options)
+            else:
+                model_ids={row['model_id'] for row in snapshot['vectors']}
+                if len(model_ids)!=1:
+                    raise ValueError('Quality queries require one frozen embedding model identity')
+                model=embedding_model_from_id(next(iter(model_ids)),cache_dir=args.cache_dir,**voyage_options)
+            if any(row['model_id'] != model.model_id for row in snapshot['vectors']):
+                raise ValueError('Embedding model differs from snapshot')
+        result=validate_graph(args.snapshot,args.job_dir,cases,model,run_id=args.run_id)
+        args.output.parent.mkdir(parents=True,exist_ok=True)
+        args.output.write_text(json.dumps(result,indent=2,ensure_ascii=False)+'\n',encoding='utf-8')
+        print(json.dumps({'output':str(args.output),'structural':result['structural']['passed'],'quality':result['quality']['status']}))
+        return 0 if result['structural']['passed'] else 1
+    finally:
+        if model is not None and hasattr(model,'close'):model.close()
+
+
+if __name__=='__main__':sys.exit(main())

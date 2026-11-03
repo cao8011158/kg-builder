@@ -1,0 +1,43 @@
+{
+  "result": "PASS",
+  "strict_0_7_retained": true,
+  "above_0_7_excluded_only_member": true,
+  "insufficient_and_low_confidence_retained": true,
+  "rp_review_only_after_actual_generated_summary": true,
+  "original_rp_nodes": 3,
+  "method_nodes": 2,
+  "benchmark_nodes": 3,
+  "areas": 1,
+  "retained_area_members": [
+    "Memory problem 1",
+    "Memory problem 3"
+  ],
+  "pending_pairs_do_not_hide_nodes": 3,
+  "all_5_cold_indexes_reuse_vectors": true,
+  "zero_api_terminal_replay": true,
+  "structural": {
+    "passed": true,
+    "failure_counts": {},
+    "failure_total": 0,
+    "details": [],
+    "details_truncated": false,
+    "coverage": {
+      "approved_items": 12,
+      "sources": 3,
+      "mentions": 9,
+      "contributions": 3,
+      "entities": 8,
+      "research_areas": 1,
+      "area_memberships": 2,
+      "excluded_memberships": 2,
+      "member_reviews": 9,
+      "accepted_groups": 5,
+      "pending_groups": 0,
+      "pending_pairs": 3,
+      "pending_mentions": 0,
+      "all_source_nodes_available": true
+    },
+    "complete_resolution": false
+  },
+  "wall_seconds": 0.35030487599942717
+}

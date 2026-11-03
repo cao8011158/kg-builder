@@ -1,0 +1,29 @@
+{
+  "pair_correct_and_certain": 23,
+  "pair_cases": 24,
+  "requests": 7,
+  "wall_seconds": 16.22863270599919,
+  "concurrency": {
+    "active": 0,
+    "peak_active": 4,
+    "started": 7,
+    "finished": 7,
+    "queued": 0,
+    "peak_queued": 1,
+    "cumulative_queue_duration_s": 4.073999298270792e-05,
+    "cumulative_request_duration_s": 57.54102917799901,
+    "request_wall_union_s": 16.2233364729982
+  },
+  "production_pair_payload_matches_successful_probe": true,
+  "checks": {
+    "scope": true,
+    "items": true,
+    "completeness": true,
+    "extraction": true,
+    "pairs": true,
+    "groups": true,
+    "members": true
+  },
+  "passed": true,
+  "interpretation": "Original assertion incorrectly expected aggregate legacy-paper approval for intentionally incomplete extraction. Raw API responses retained. All four item support judgments pass, while omissions correctly block legacy aggregate. Item-v1 completeness remains diagnostic. No API repeated."
+}

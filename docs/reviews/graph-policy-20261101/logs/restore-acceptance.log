@@ -1,0 +1,53 @@
+{
+  "download_sha_verified": true,
+  "manifest_files_verified": 27,
+  "new_api_calls": 0,
+  "databases": {
+    "graph.sqlite": {
+      "quick_check": "ok",
+      "foreign_key_violations": 0
+    },
+    "semantic.sqlite": {
+      "quick_check": "ok",
+      "foreign_key_violations": 0
+    },
+    "snapshot-master.sqlite": {
+      "quick_check": "ok",
+      "foreign_key_violations": 0
+    }
+  },
+  "terminal_replay": {
+    "unchanged": true,
+    "index_status": "verified",
+    "completed_at": 1793546948.6255746,
+    "requests": 153,
+    "http_peak": 4
+  },
+  "cold_indexes": {
+    "embedding_cache_hits": 329,
+    "embeddings_computed": 0,
+    "dense_index_builds": 5,
+    "detail_rows": 0
+  },
+  "queries": [
+    {
+      "kind": "ResearchProblem",
+      "name": "Restart decision value",
+      "rank": 1
+    },
+    {
+      "kind": "Method",
+      "name": "Agentic Memory (AgeMem)",
+      "rank": 1
+    },
+    {
+      "kind": "Benchmark",
+      "name": "τ³-Bench",
+      "rank": 1
+    }
+  ],
+  "area_members": 57,
+  "cli_default_search_includes_area": true,
+  "full_acceptance_identical": true,
+  "wall_seconds": 5.5458879500001785
+}

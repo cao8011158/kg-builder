@@ -1,0 +1,12 @@
+test_atomic_conflicts_and_locality (tests.test_semantic_workflow.SemanticTests.test_atomic_conflicts_and_locality) ... ok
+test_changed_source_revokes_old_membership_and_stale_packet (tests.test_semantic_workflow.SemanticTests.test_changed_source_revokes_old_membership_and_stale_packet) ... ok
+test_ingest_review_search_and_incremental_matching (tests.test_semantic_workflow.SemanticTests.test_ingest_review_search_and_incremental_matching) ... ok
+test_kind_first_candidate_and_alias_sparse (tests.test_semantic_workflow.SemanticTests.test_kind_first_candidate_and_alias_sparse) ... ok
+test_model_change_invalidates_old_review_packet (tests.test_semantic_workflow.SemanticTests.test_model_change_invalidates_old_review_packet) ... ok
+test_postcommit_index_failure_invalidates_warm_cache (tests.test_semantic_workflow.SemanticTests.test_postcommit_index_failure_invalidates_warm_cache) ... ok
+test_source_authored_primary_and_explicit_alias (tests.test_semantic_workflow.SemanticTests.test_source_authored_primary_and_explicit_alias) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.507s
+
+OK

@@ -1,0 +1,14 @@
+test_bridge_is_candidate_not_equivalence (tests.test_semantic_vectors.ClusteringTests.test_bridge_is_candidate_not_equivalence) ... ok
+test_candidates_bound_when_unrelated_points_added (tests.test_semantic_vectors.ClusteringTests.test_candidates_bound_when_unrelated_points_added) ... ok
+test_degenerate_and_sparse (tests.test_semantic_vectors.ClusteringTests.test_degenerate_and_sparse) ... ok
+test_mutual_topk_changes_edge_set (tests.test_semantic_vectors.ClusteringTests.test_mutual_topk_changes_edge_set) ... ok
+test_bad_encoder_result_rejected (tests.test_semantic_vectors.EmbeddingTests.test_bad_encoder_result_rejected) ... ok
+test_lazy_normalized_and_stable_identity (tests.test_semantic_vectors.EmbeddingTests.test_lazy_normalized_and_stable_identity) ... ok
+test_search_more_than_initial_ef (tests.test_semantic_vectors.IndexTests.test_search_more_than_initial_ef) ... ok
+test_upsert_delete_and_resize_stable_ids (tests.test_semantic_vectors.IndexTests.test_upsert_delete_and_resize_stable_ids) ... ok
+test_validation_empty_and_ties (tests.test_semantic_vectors.IndexTests.test_validation_empty_and_ties) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.082s
+
+OK

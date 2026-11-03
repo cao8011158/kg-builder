@@ -1,0 +1,164 @@
+test_apply_repeat_conflict_and_retention (test_corpus_batch.CorpusBatchTests.test_apply_repeat_conflict_and_retention) ... ok
+test_cli_reports_failure_stage (test_corpus_batch.CorpusBatchTests.test_cli_reports_failure_stage) ... ValueError: Report path must differ from databases and input files
+ok
+test_dry_run_read_only_and_invalid_no_files (test_corpus_batch.CorpusBatchTests.test_dry_run_read_only_and_invalid_no_files) ... ok
+test_real_manifest_pin_metadata_and_excluded_empty_topics (test_corpus_batch.CorpusBatchTests.test_real_manifest_pin_metadata_and_excluded_empty_topics) ... ok
+test_rollback_on_mid_batch_failure (test_corpus_batch.CorpusBatchTests.test_rollback_on_mid_batch_failure) ... ok
+test_sidecar_failure_retry_and_reuse_gate (test_corpus_batch.CorpusBatchTests.test_sidecar_failure_retry_and_reuse_gate) ... ok
+test_batches_bounded (test_decision_api.DecisionTests.test_batches_bounded) ... ok
+test_concurrent_failure_retains_completed_request_audits (test_decision_api.DecisionTests.test_concurrent_failure_retains_completed_request_audits) ... ok
+test_dispatch_out_of_order_keeps_source_binding (test_decision_api.DecisionTests.test_dispatch_out_of_order_keeps_source_binding) ... ok
+test_every_question_targets_its_own_item_and_field (test_decision_api.DecisionTests.test_every_question_targets_its_own_item_and_field) ... ok
+test_item_results_and_diagnostic_completeness (test_decision_api.DecisionTests.test_item_results_and_diagnostic_completeness) ... ok
+test_long_field_review_splits_questions (test_decision_api.DecisionTests.test_long_field_review_splits_questions) ... ok
+test_native_request_and_audit (test_decision_api.DecisionTests.test_native_request_and_audit) ... ok
+test_pair_and_group_semantics (test_decision_api.DecisionTests.test_pair_and_group_semantics) ... ok
+test_queue_time_excluded_from_http_duration (test_decision_api.DecisionTests.test_queue_time_excluded_from_http_duration) ... ok
+test_reject_malformed_answers (test_decision_api.DecisionTests.test_reject_malformed_answers) ... ok
+test_retry_is_bounded_and_audited (test_decision_api.DecisionTests.test_retry_is_bounded_and_audited) ... ok
+test_scope_and_reviews (test_decision_api.DecisionTests.test_scope_and_reviews) ... ok
+test_shared_audit_request_id_and_adaptive_payload_batch (test_decision_api.DecisionTests.test_shared_audit_request_id_and_adaptive_payload_batch) ... ok
+test_shared_http_budget_and_per_thread_audit (test_decision_api.DecisionTests.test_shared_http_budget_and_per_thread_audit) ... ok
+test_atomic_invalid_second_and_sql_failure_in_outer_transaction (test_entity_resolution.ResolutionTests.test_atomic_invalid_second_and_sql_failure_in_outer_transaction) ... ok
+test_cli_invalid_manifest_before_db_creation (test_entity_resolution.ResolutionTests.test_cli_invalid_manifest_before_db_creation) ... ok
+test_immutable_import_and_indexed_query (test_entity_resolution.ResolutionTests.test_immutable_import_and_indexed_query) ... ok
+test_lookup_uses_one_snapshot_and_preserves_outer_transaction (test_entity_resolution.ResolutionTests.test_lookup_uses_one_snapshot_and_preserves_outer_transaction) ... ok
+test_reconcile_resolution_columns_in_different_order (test_entity_resolution.ResolutionTests.test_reconcile_resolution_columns_in_different_order) ... ok
+test_reconcile_retention_repeat_and_remap_failure (test_entity_resolution.ResolutionTests.test_reconcile_retention_repeat_and_remap_failure) ... ok
+test_semantic_guards (test_entity_resolution.ResolutionTests.test_semantic_guards) ... ok
+test_stale_mention_and_support_closure (test_entity_resolution.ResolutionTests.test_stale_mention_and_support_closure) ... ok
+test_compound_cross_kind_and_non_method (test_entity_resolution_v2.ResolutionV2Tests.test_compound_cross_kind_and_non_method) ... ok
+test_deep_parent_chain_is_bounded_by_actual_closure (test_entity_resolution_v2.ResolutionV2Tests.test_deep_parent_chain_is_bounded_by_actual_closure) ... ok
+test_explicit_entity_index_and_unrelated_growth (test_entity_resolution_v2.ResolutionV2Tests.test_explicit_entity_index_and_unrelated_growth) ... ok
+test_hierarchy_rejections (test_entity_resolution_v2.ResolutionV2Tests.test_hierarchy_rejections) ... ok
+test_outcome_and_components_negative (test_entity_resolution_v2.ResolutionV2Tests.test_outcome_and_components_negative) ... ok
+test_problem_hierarchy_diamond_and_stale_parent (test_entity_resolution_v2.ResolutionV2Tests.test_problem_hierarchy_diamond_and_stale_parent) ... ok
+test_v1_opaque_fields_named_like_v2_are_not_interpreted (test_entity_resolution_v2.ResolutionV2Tests.test_v1_opaque_fields_named_like_v2_are_not_interpreted) ... ok
+test_v1_shape_and_v2_reconciliation_retention (test_entity_resolution_v2.ResolutionV2Tests.test_v1_shape_and_v2_reconciliation_retention) ... ok
+test_pins_and_generic_json (test_extraction_api.ExtractionAPITests.test_pins_and_generic_json) ... ok
+test_requires_pins_and_disabled (test_extraction_api.ExtractionAPITests.test_requires_pins_and_disabled) ... ok
+test_cli_validates_before_db_creation (test_extraction_validation.ValidationTests.test_cli_validates_before_db_creation) ... ok
+test_idempotence_existing_id_and_outer_transaction (test_extraction_validation.ValidationTests.test_idempotence_existing_id_and_outer_transaction) ... ok
+test_invalid_second_and_sql_failure_atomic (test_extraction_validation.ValidationTests.test_invalid_second_and_sql_failure_atomic) ... ok
+test_legacy_and_unknown_version (test_extraction_validation.ValidationTests.test_legacy_and_unknown_version) ... ok
+test_reconcile_remaps_version_scoped_payload_refs (test_extraction_validation.ValidationTests.test_reconcile_remaps_version_scoped_payload_refs) ... ok
+test_review_reconcile_and_unknown_table (test_extraction_validation.ValidationTests.test_review_reconcile_and_unknown_table) ... ok
+test_valid_and_semantic_failures (test_extraction_validation.ValidationTests.test_valid_and_semantic_failures) ... ok
+test_cli_rejects_output_collisions_before_writing (test_graph_validation.GraphValidationTests.test_cli_rejects_output_collisions_before_writing) ... ok
+test_coherent_all_pending_has_no_quality_claim (test_graph_validation.GraphValidationTests.test_coherent_all_pending_has_no_quality_claim) ... ok
+test_complete_graph_and_labeled_quality_and_read_only_job (test_graph_validation.GraphValidationTests.test_complete_graph_and_labeled_quality_and_read_only_job) ... ok
+test_different_pair_shared_entity_rejected (test_graph_validation.GraphValidationTests.test_different_pair_shared_entity_rejected) ... ok
+test_faults_missing_source_wrong_kind_merge_and_fts (test_graph_validation.GraphValidationTests.test_faults_missing_source_wrong_kind_merge_and_fts) ... ok
+test_item_review_hash_prevents_payload_substitution (test_graph_validation.GraphValidationTests.test_item_review_hash_prevents_payload_substitution) ... ok
+test_master_preserves_source_text_pins_and_extraction (test_graph_validation.GraphValidationTests.test_master_preserves_source_text_pins_and_extraction) ... ok
+test_pending_is_reported_without_quality_pass_claim (test_graph_validation.GraphValidationTests.test_pending_is_reported_without_quality_pass_claim) ... ok
+test_conflict_rollback_and_version_order (test_ingestion.IngestionTests.test_conflict_rollback_and_version_order) ... ok
+test_default_collectors_exclude_semantic_scholar (test_ingestion.IngestionTests.test_default_collectors_exclude_semantic_scholar) ... ok
+test_identifiers_and_source_enrichment (test_ingestion.IngestionTests.test_identifiers_and_source_enrichment) ... ok
+test_locality_index_plan_and_unrelated_growth (test_ingestion.IngestionTests.test_locality_index_plan_and_unrelated_growth) ... ok
+test_output_paths_and_source_history (test_ingestion.IngestionTests.test_output_paths_and_source_history) ... ok
+test_reconciliation_preserves_extractions_and_is_deterministic (test_ingestion.IngestionTests.test_reconciliation_preserves_extractions_and_is_deterministic) ... ok
+test_concurrent_identical_submission_is_accepted_then_duplicate (test_preparation.ItemPolicyTests.test_concurrent_identical_submission_is_accepted_then_duplicate) ... ok
+test_empty_is_terminal (test_preparation.ItemPolicyTests.test_empty_is_terminal) ... ok
+test_failed_second_review_drops_only_item (test_preparation.ItemPolicyTests.test_failed_second_review_drops_only_item) ... ok
+test_keyed_repair_freezes_approved_and_partial_snapshot (test_preparation.ItemPolicyTests.test_keyed_repair_freezes_approved_and_partial_snapshot) ... ok
+test_parallel_api_extractors_share_claim_validator (test_preparation.ItemPolicyTests.test_parallel_api_extractors_share_claim_validator) ... ok
+test_parallel_scope_claims_overlap_without_duplicates (test_preparation.ItemPolicyTests.test_parallel_scope_claims_overlap_without_duplicates) ... ok
+test_plural_error_audits_and_diagnostic_failure_are_retained (test_preparation.ItemPolicyTests.test_plural_error_audits_and_diagnostic_failure_are_retained) ... ok
+test_source_change_revokes_approval (test_preparation.ItemPolicyTests.test_source_change_revokes_approval) ... ok
+test_wrong_review_hash_does_not_approve (test_preparation.ItemPolicyTests.test_wrong_review_hash_does_not_approve) ... ok
+test_append_only_audit_and_recovered_transient_error (test_preparation.PreparationTests.test_append_only_audit_and_recovered_transient_error) ... ok
+test_balanced_sources_topics_and_resume_without_refetch (test_preparation.PreparationTests.test_balanced_sources_topics_and_resume_without_refetch) ... ok
+test_claim_duplicate_stale_source_and_repair (test_preparation.PreparationTests.test_claim_duplicate_stale_source_and_repair) ... ok
+test_claim_locality_ignores_completed_same_kind_tasks (test_preparation.PreparationTests.test_claim_locality_ignores_completed_same_kind_tasks) ... ok
+test_repair_limit_and_expired_lease (test_preparation.PreparationTests.test_repair_limit_and_expired_lease) ... ok
+test_shortfall_and_stop_before_loop (test_preparation.PreparationTests.test_shortfall_and_stop_before_loop) ... ok
+test_streaming_snapshot_and_restart (test_preparation.PreparationTests.test_streaming_snapshot_and_restart) ... ok
+test_terminal_replay_preserves_first_completion_and_work (test_preparation.PreparationTests.test_terminal_replay_preserves_first_completion_and_work) ... ok
+test_minimal_contract_and_rejections (test_retrieval_extraction.RetrievalTests.test_minimal_contract_and_rejections) ... ok
+test_optional_api_disabled (test_retrieval_extraction.RetrievalTests.test_optional_api_disabled) ... ok
+test_pinned_versions_and_atomic_mixed_batch (test_retrieval_extraction.RetrievalTests.test_pinned_versions_and_atomic_mixed_batch) ... ok
+test_reconcile_remaps_local_contribution_and_retains_prose (test_retrieval_extraction.RetrievalTests.test_reconcile_remaps_local_contribution_and_retains_prose) ... ok
+test_same_paper_versions_remain_independent (test_retrieval_extraction.RetrievalTests.test_same_paper_versions_remain_independent) ... ok
+test_digest_and_unrelated_growth (test_retrieval_preprocess.RetrievalPreprocessTests.test_digest_and_unrelated_growth) ... ok
+test_full_semantics_and_indexed_point_lookup (test_retrieval_preprocess.RetrievalPreprocessTests.test_full_semantics_and_indexed_point_lookup) ... ok
+test_missing_error_and_unrequested_are_distinct (test_retrieval_preprocess.RetrievalPreprocessTests.test_missing_error_and_unrequested_are_distinct) ... ok
+test_unknown_id_rejects_without_replacing_sidecar (test_retrieval_preprocess.RetrievalPreprocessTests.test_unknown_id_rejects_without_replacing_sidecar) ... ok
+test_bridge_is_candidate_not_equivalence (test_semantic_vectors.ClusteringTests.test_bridge_is_candidate_not_equivalence) ... ok
+test_candidates_bound_when_unrelated_points_added (test_semantic_vectors.ClusteringTests.test_candidates_bound_when_unrelated_points_added) ... ok
+test_degenerate_and_sparse (test_semantic_vectors.ClusteringTests.test_degenerate_and_sparse) ... ok
+test_mutual_topk_changes_edge_set (test_semantic_vectors.ClusteringTests.test_mutual_topk_changes_edge_set) ... ok
+test_bad_encoder_result_rejected (test_semantic_vectors.EmbeddingTests.test_bad_encoder_result_rejected) ... ok
+test_lazy_normalized_and_stable_identity (test_semantic_vectors.EmbeddingTests.test_lazy_normalized_and_stable_identity) ... ok
+test_search_more_than_initial_ef (test_semantic_vectors.IndexTests.test_search_more_than_initial_ef) ... ok
+test_upsert_delete_and_resize_stable_ids (test_semantic_vectors.IndexTests.test_upsert_delete_and_resize_stable_ids) ... ok
+test_validation_empty_and_ties (test_semantic_vectors.IndexTests.test_validation_empty_and_ties) ... ok
+test_atomic_conflicts_and_locality (test_semantic_workflow.SemanticTests.test_atomic_conflicts_and_locality) ... ok
+test_changed_source_revokes_old_membership_and_stale_packet (test_semantic_workflow.SemanticTests.test_changed_source_revokes_old_membership_and_stale_packet) ... ok
+test_contribution_dense_paraphrase_and_local_source_refresh (test_semantic_workflow.SemanticTests.test_contribution_dense_paraphrase_and_local_source_refresh) ... ok
+test_exact_casefold_alias_beats_dense_distractor (test_semantic_workflow.SemanticTests.test_exact_casefold_alias_beats_dense_distractor) ... ok
+test_ingest_review_search_and_incremental_matching (test_semantic_workflow.SemanticTests.test_ingest_review_search_and_incremental_matching) ... ok
+test_kind_first_candidate_and_alias_sparse (test_semantic_workflow.SemanticTests.test_kind_first_candidate_and_alias_sparse) ... ok
+test_model_change_invalidates_old_review_packet (test_semantic_workflow.SemanticTests.test_model_change_invalidates_old_review_packet) ... ok
+test_postcommit_index_failure_invalidates_warm_cache (test_semantic_workflow.SemanticTests.test_postcommit_index_failure_invalidates_warm_cache) ... ok
+test_source_authored_primary_and_explicit_alias (test_semantic_workflow.SemanticTests.test_source_authored_primary_and_explicit_alias) ... ok
+test_build_names_recovery_retrieval_and_immutable_input (test_snapshot_graph.SnapshotGraphTests.test_build_names_recovery_retrieval_and_immutable_input) ... ok
+test_coherence_failure_preserves_pending_and_source_fingerprint (test_snapshot_graph.SnapshotGraphTests.test_coherence_failure_preserves_pending_and_source_fingerprint) ... ok
+test_empty_accepted_snapshot_completes_without_embedding_model (test_snapshot_graph.SnapshotGraphTests.test_empty_accepted_snapshot_completes_without_embedding_model) ... ok
+test_generated_name_requires_final_jev_coherence (test_snapshot_graph.SnapshotGraphTests.test_generated_name_requires_final_jev_coherence) ... ok
+test_item_snapshot_requires_reviewed_exact_approved_keys (test_snapshot_graph.SnapshotGraphTests.test_item_snapshot_requires_reviewed_exact_approved_keys) ... ok
+test_jev_http_intervals_are_distinct_from_backoff_and_unique_on_replay (test_snapshot_graph.SnapshotGraphTests.test_jev_http_intervals_are_distinct_from_backoff_and_unique_on_replay) ... ok
+test_parallel_api_names_bind_out_of_order_and_release_failed_own_lease (test_snapshot_graph.SnapshotGraphTests.test_parallel_api_names_bind_out_of_order_and_release_failed_own_lease) ... ok
+test_pending_pair_and_stale_lease (test_snapshot_graph.SnapshotGraphTests.test_pending_pair_and_stale_lease) ... ok
+test_restored_snapshot_path_and_timestamp_accept_same_bytes_only (test_snapshot_graph.SnapshotGraphTests.test_restored_snapshot_path_and_timestamp_accept_same_bytes_only) ... ok
+
+----------------------------------------------------------------------
+Ran 112 tests in 8.869s
+
+OK
+{"batch_id": "b1", "stage": "validated", "papers": 1, "extractions": 1, "reviews": 1, "master_new": 0, "sidecar_imported": 0}
+{
+  "started_at": "2026-11-01T12:54:14.878344+00:00",
+  "completed_at": "2026-11-01T12:54:14.889213+00:00",
+  "mode": "api_first_page",
+  "since": "2025-01-01",
+  "until": "2026-11-01",
+  "per_query": 10,
+  "db_before": {
+    "papers": 0,
+    "versions": 0,
+    "extractions": 0,
+    "sources": 0
+  },
+  "db_after": {
+    "papers": 0,
+    "versions": 0,
+    "extractions": 0,
+    "sources": 0
+  },
+  "by_source": {},
+  "queries": [
+    {
+      "source": "openalex",
+      "topic": "memory",
+      "query": "term",
+      "received": 0,
+      "stored": 0,
+      "date_filtered": 0,
+      "unknown_date": 0,
+      "errors": []
+    },
+    {
+      "source": "arxiv",
+      "topic": "memory",
+      "query": "term",
+      "received": 0,
+      "stored": 0,
+      "date_filtered": 0,
+      "unknown_date": 0,
+      "errors": []
+    }
+  ],
+  "successful_queries": 2,
+  "failed_queries": 0
+}

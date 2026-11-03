@@ -1,0 +1,11 @@
+{
+  "status": "BLOCKED",
+  "batch_id": "postgres-batch1",
+  "review_rounds": 1,
+  "reasons": [
+    "Current task merge authorization not recorded",
+    "developer/fast_regression: missing evidence on current head",
+    "developer/targeted: missing evidence on current head"
+  ],
+  "limitation": "Recorded evidence only; independently inspect code, logs, authorization and remote refs."
+}

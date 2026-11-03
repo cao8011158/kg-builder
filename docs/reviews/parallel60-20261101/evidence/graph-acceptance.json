@@ -1,0 +1,36 @@
+{
+  "schema_version": "research-kg-graph-acceptance/1",
+  "snapshot_hash": "65015c638bb028e74139e248abdfbb391fb8875f3beddb0d5fc47229c4700b41",
+  "structural": {
+    "passed": true,
+    "failure_counts": {},
+    "failure_total": 0,
+    "details": [],
+    "details_truncated": false,
+    "coverage": {
+      "approved_items": 346,
+      "sources": 46,
+      "mentions": 229,
+      "contributions": 117,
+      "entities": 142,
+      "accepted_groups": 142,
+      "pending_groups": 64,
+      "pending_pairs": 55,
+      "pending_mentions": 85
+    },
+    "complete_resolution": false
+  },
+  "quality": {
+    "status": "evaluated",
+    "query_cases": 15,
+    "labeled_positive_queries": 15,
+    "hit_at_5": 0.5333333333333333,
+    "mrr": 0.48000000000000004,
+    "identity": {
+      "resolved": 7,
+      "wrong": 0,
+      "pending": 18,
+      "unknown_unscored": 5
+    }
+  }
+}

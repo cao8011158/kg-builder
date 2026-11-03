@@ -1,0 +1,30 @@
+{
+  "server": {
+    "version": "PostgreSQL 16.15 (Debian 16.15-1.pgdg13+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit",
+    "database": "kg_test"
+  },
+  "settings": {
+    "data_checksums": "off",
+    "data_directory": "/var/lib/postgresql/data",
+    "fsync": "on",
+    "full_page_writes": "on",
+    "synchronous_commit": "on"
+  },
+  "lifetime": "ephemeral CI test service",
+  "durable_deployment_verified": false,
+  "data_mounts": [
+    {
+      "Type": "volume",
+      "Name": "a1d6d58a6bed99e27afe2df02983e83d689aa695d24d1c80f12acf4ee51fcacc",
+      "Source": "/var/lib/docker/volumes/a1d6d58a6bed99e27afe2df02983e83d689aa695d24d1c80f12acf4ee51fcacc/_data",
+      "Destination": "/var/lib/postgresql/data",
+      "Driver": "local",
+      "Mode": "",
+      "RW": true,
+      "Propagation": "",
+      "host_filesystem": {
+        "verified": false
+      }
+    }
+  ]
+}

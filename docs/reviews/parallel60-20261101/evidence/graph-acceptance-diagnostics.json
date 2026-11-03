@@ -1,0 +1,451 @@
+{
+  "group_checks": {
+    "jev_group_passed": 186,
+    "passed_group_but_blocked_by_pair_uncertainty": 44,
+    "jev_group_not_passed": 20
+  },
+  "identity_by_stratum": {
+    "other_cross_record": {
+      "pending": 16,
+      "unknown_unscored": 5,
+      "correct": 5
+    },
+    "positive_pairs": {
+      "candidate_found": 13,
+      "candidate_same": 11,
+      "candidate_pending": 2,
+      "candidate_missing": 1,
+      "candidate_none": 1
+    },
+    "duplicate_record_control": {
+      "correct": 2,
+      "pending": 2
+    }
+  },
+  "identity_cases": [
+    {
+      "id": "i01",
+      "expected": "same",
+      "outcome": "pending",
+      "stratum": "other_cross_record",
+      "candidate_decision": "same",
+      "left_name": "ALFWorld",
+      "right_name": "ALFWorld"
+    },
+    {
+      "id": "i02",
+      "expected": "same",
+      "outcome": "pending",
+      "stratum": "other_cross_record",
+      "candidate_decision": "same",
+      "left_name": "WebShop",
+      "right_name": "WebShop"
+    },
+    {
+      "id": "i03",
+      "expected": "same",
+      "outcome": "pending",
+      "stratum": "other_cross_record",
+      "candidate_decision": "same",
+      "left_name": "ALFWorld",
+      "right_name": "ALFWorld"
+    },
+    {
+      "id": "i04",
+      "expected": "same",
+      "outcome": "pending",
+      "stratum": "other_cross_record",
+      "candidate_decision": "same",
+      "left_name": "AppWorld",
+      "right_name": "AppWorld"
+    },
+    {
+      "id": "i05",
+      "expected": "same",
+      "outcome": "pending",
+      "stratum": "other_cross_record",
+      "candidate_decision": "same",
+      "left_name": "AppWorld",
+      "right_name": "AppWorld"
+    },
+    {
+      "id": "i06",
+      "expected": "same",
+      "outcome": "pending",
+      "stratum": "other_cross_record",
+      "candidate_decision": "pending",
+      "left_name": "LoCoMo",
+      "right_name": "LoCoMo"
+    },
+    {
+      "id": "i07",
+      "expected": "same",
+      "outcome": "pending",
+      "stratum": "other_cross_record",
+      "candidate_decision": "pending",
+      "left_name": "MemGallery",
+      "right_name": "MemGallery"
+    },
+    {
+      "id": "i08",
+      "expected": "same",
+      "outcome": "pending",
+      "stratum": "other_cross_record",
+      "candidate_decision": "same",
+      "left_name": "LongMemEval-S",
+      "right_name": "LongMemEval-S"
+    },
+    {
+      "id": "i09",
+      "expected": "same",
+      "outcome": "pending",
+      "stratum": "other_cross_record",
+      "candidate_decision": null,
+      "left_name": "SWE-bench Verified",
+      "right_name": "SWE-bench Verified"
+    },
+    {
+      "id": "i10",
+      "expected": "same",
+      "outcome": "correct",
+      "stratum": "duplicate_record_control",
+      "candidate_decision": "same",
+      "left_name": "SkillShift-Bench",
+      "right_name": "SkillShift-Bench"
+    },
+    {
+      "id": "i11",
+      "expected": "same",
+      "outcome": "pending",
+      "stratum": "duplicate_record_control",
+      "candidate_decision": "same",
+      "left_name": "Three-dimensional context-compression taxonomy",
+      "right_name": "Three-dimensional context-compression taxonomy"
+    },
+    {
+      "id": "i12",
+      "expected": "same",
+      "outcome": "pending",
+      "stratum": "duplicate_record_control",
+      "candidate_decision": "same",
+      "left_name": "Reliable agent trajectory compression",
+      "right_name": "Reliable agent trajectory compression"
+    },
+    {
+      "id": "i13",
+      "expected": "same",
+      "outcome": "correct",
+      "stratum": "duplicate_record_control",
+      "candidate_decision": "same",
+      "left_name": "dynamic-regret analysis",
+      "right_name": "dynamic-regret analysis"
+    },
+    {
+      "id": "i14",
+      "expected": "unknown",
+      "outcome": "unknown_unscored",
+      "stratum": "other_cross_record",
+      "candidate_decision": "different",
+      "left_name": "Coupled skill evolution",
+      "right_name": "Decoupled skill evolution and policy optimization"
+    },
+    {
+      "id": "i15",
+      "expected": "different",
+      "outcome": "pending",
+      "stratum": "other_cross_record",
+      "candidate_decision": null,
+      "left_name": "AppWorld",
+      "right_name": "WebShop"
+    },
+    {
+      "id": "i16",
+      "expected": "different",
+      "outcome": "pending",
+      "stratum": "other_cross_record",
+      "candidate_decision": "different",
+      "left_name": "ALFWorld",
+      "right_name": "AppWorld"
+    },
+    {
+      "id": "i17",
+      "expected": "different",
+      "outcome": "pending",
+      "stratum": "other_cross_record",
+      "candidate_decision": "different",
+      "left_name": "LoCoMo",
+      "right_name": "MemGallery"
+    },
+    {
+      "id": "i18",
+      "expected": "different",
+      "outcome": "pending",
+      "stratum": "other_cross_record",
+      "candidate_decision": "different",
+      "left_name": "SkillShift-Bench",
+      "right_name": "WebShop"
+    },
+    {
+      "id": "i19",
+      "expected": "different",
+      "outcome": "correct",
+      "stratum": "other_cross_record",
+      "candidate_decision": "different",
+      "left_name": "RSE-Bench",
+      "right_name": "SkillShift-Bench"
+    },
+    {
+      "id": "i20",
+      "expected": "different",
+      "outcome": "correct",
+      "stratum": "other_cross_record",
+      "candidate_decision": "different",
+      "left_name": "Focus",
+      "right_name": "FOCUS"
+    },
+    {
+      "id": "i21",
+      "expected": "different",
+      "outcome": "correct",
+      "stratum": "other_cross_record",
+      "candidate_decision": "different",
+      "left_name": "TRACE",
+      "right_name": "PAIR (Prompt Adaptation using Interventional Rollouts)"
+    },
+    {
+      "id": "i22",
+      "expected": "different",
+      "outcome": "correct",
+      "stratum": "other_cross_record",
+      "candidate_decision": "different",
+      "left_name": "Skill1",
+      "right_name": "SkillRise"
+    },
+    {
+      "id": "i23",
+      "expected": "different",
+      "outcome": "pending",
+      "stratum": "other_cross_record",
+      "candidate_decision": "different",
+      "left_name": "MemFit",
+      "right_name": "TrawMem"
+    },
+    {
+      "id": "i24",
+      "expected": "different",
+      "outcome": "pending",
+      "stratum": "other_cross_record",
+      "candidate_decision": "different",
+      "left_name": "Memory tax",
+      "right_name": "Memory Echo"
+    },
+    {
+      "id": "i25",
+      "expected": "unknown",
+      "outcome": "unknown_unscored",
+      "stratum": "other_cross_record",
+      "candidate_decision": "different",
+      "left_name": "LongMemEval",
+      "right_name": "LongMemEval-S"
+    },
+    {
+      "id": "i26",
+      "expected": "unknown",
+      "outcome": "unknown_unscored",
+      "stratum": "other_cross_record",
+      "candidate_decision": "different",
+      "left_name": "SWE-bench Lite",
+      "right_name": "SWE-bench Verified"
+    },
+    {
+      "id": "i27",
+      "expected": "unknown",
+      "outcome": "unknown_unscored",
+      "stratum": "other_cross_record",
+      "candidate_decision": "pending",
+      "left_name": "A-Mem",
+      "right_name": "A-MEM"
+    },
+    {
+      "id": "i28",
+      "expected": "same",
+      "outcome": "pending",
+      "stratum": "other_cross_record",
+      "candidate_decision": "same",
+      "left_name": "Agent context bloat",
+      "right_name": "Long agent histories"
+    },
+    {
+      "id": "i29",
+      "expected": "unknown",
+      "outcome": "unknown_unscored",
+      "stratum": "other_cross_record",
+      "candidate_decision": "different",
+      "left_name": "Execution instability after context compression",
+      "right_name": "Compression event attribution"
+    },
+    {
+      "id": "i30",
+      "expected": "different",
+      "outcome": "correct",
+      "stratum": "other_cross_record",
+      "candidate_decision": null,
+      "left_name": "compressor distillation",
+      "right_name": "Multi-path retrieval with cross-encoder reranking"
+    }
+  ],
+  "query_cases": [
+    {
+      "id": "q01",
+      "kind": "ResearchProblem",
+      "rank": null,
+      "query": "How can an agent keep long task histories from inflating inference costs and distracting its reasoning?",
+      "expected_paper_ids": [
+        "arxiv:2510.00615",
+        "arxiv:2601.07190"
+      ]
+    },
+    {
+      "id": "q02",
+      "kind": "ResearchProblem",
+      "rank": 1,
+      "query": "What goes wrong when an agent resumes execution after its context has been summarized?",
+      "expected_paper_ids": [
+        "arxiv:2608.06503",
+        "arxiv:2609.36526"
+      ]
+    },
+    {
+      "id": "q03",
+      "kind": "ResearchProblem",
+      "rank": 1,
+      "query": "How can reusable agent skills transfer across related tasks instead of being relearned for each episode?",
+      "expected_paper_ids": [
+        "arxiv:2607.26784"
+      ]
+    },
+    {
+      "id": "q04",
+      "kind": "ResearchProblem",
+      "rank": null,
+      "query": "How should a memory system handle answers when obsolete facts compete with newer updates?",
+      "expected_paper_ids": [
+        "arxiv:2610.36308"
+      ]
+    },
+    {
+      "id": "q05",
+      "kind": "ResearchProblem",
+      "rank": null,
+      "query": "How do learned web agent skills cope when the site changes the context, perception, or available actions?",
+      "expected_paper_ids": [
+        "arxiv:2610.33528",
+        "doi:10.18653/2026.emnlp-main.1952"
+      ]
+    },
+    {
+      "id": "q06",
+      "kind": "Method",
+      "rank": 5,
+      "query": "Which approach lets an agent decide when to consolidate key lessons and prune raw history?",
+      "expected_paper_ids": [
+        "arxiv:2601.07190"
+      ]
+    },
+    {
+      "id": "q07",
+      "kind": "Method",
+      "rank": 1,
+      "query": "Find a compression technique that compares continuations from the same state to revise a summary prompt after failures.",
+      "expected_paper_ids": [
+        "arxiv:2608.06503",
+        "arxiv:2609.36526"
+      ]
+    },
+    {
+      "id": "q08",
+      "kind": "Method",
+      "rank": 1,
+      "query": "Which memory architecture keeps verbatim turns with cheap insertion and combines lexical and semantic retrieval?",
+      "expected_paper_ids": [
+        "arxiv:2610.00872"
+      ]
+    },
+    {
+      "id": "q09",
+      "kind": "Method",
+      "rank": 1,
+      "query": "What system selects memories as a budgeted slate like a recommender cascade?",
+      "expected_paper_ids": [
+        "arxiv:2610.34673"
+      ]
+    },
+    {
+      "id": "q10",
+      "kind": "Method",
+      "rank": 1,
+      "query": "Find skill learning that assigns credit to later tasks while curating an evolving shared skill document.",
+      "expected_paper_ids": [
+        "arxiv:2607.26784"
+      ]
+    },
+    {
+      "id": "q11",
+      "kind": "Benchmark",
+      "rank": null,
+      "query": "Which papers evaluate on the web shopping agent benchmark WebShop?",
+      "expected_paper_ids": [
+        "arxiv:2605.06130",
+        "arxiv:2607.26784",
+        "arxiv:2609.04865",
+        "doi:10.18653/2026.findings-emnlp.136"
+      ]
+    },
+    {
+      "id": "q12",
+      "kind": "Benchmark",
+      "rank": null,
+      "query": "Find agent memory studies reporting results on LoCoMo.",
+      "expected_paper_ids": [
+        "arxiv:2610.00872",
+        "arxiv:2610.36918",
+        "arxiv:2610.37443",
+        "arxiv:2610.39790",
+        "doi:10.5281/zenodo.21964737"
+      ]
+    },
+    {
+      "id": "q13",
+      "kind": "Benchmark",
+      "rank": null,
+      "query": "Where was the AppWorld benchmark used to assess compression or agent workflow quality?",
+      "expected_paper_ids": [
+        "arxiv:2510.00615",
+        "arxiv:2608.06503",
+        "arxiv:2610.35966"
+      ]
+    },
+    {
+      "id": "q14",
+      "kind": "Benchmark",
+      "rank": 1,
+      "query": "What benchmark tests skill use when a web environment shifts during execution?",
+      "expected_paper_ids": [
+        "arxiv:2610.33528",
+        "doi:10.18653/2026.emnlp-main.1952"
+      ]
+    },
+    {
+      "id": "q15",
+      "kind": "Benchmark",
+      "rank": null,
+      "query": "Which studies use LongMemEval-S rather than the unsuffixed LongMemEval?",
+      "expected_paper_ids": [
+        "arxiv:2610.00872",
+        "arxiv:2610.37443",
+        "arxiv:2610.39790"
+      ]
+    }
+  ],
+  "label_limits": "Agent source references, not human gold; 4 same-title/version controls separate; 5 unknownunscored"
+}

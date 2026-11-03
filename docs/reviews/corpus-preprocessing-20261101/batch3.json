@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "batch_id": "corpus-preprocessing-20261101-batch3",
+  "repository": "cao8011158/kg-builder",
+  "branch": "work/retrieval-pilot-20261031",
+  "base_sha": "9ac0a1184f687837cd1bd9380a967c0c50ff0a74",
+  "head_sha": "9b7905462f3afb28f26fc9ccd9ab9d2d310059c7",
+  "target_branch": "main",
+  "target_sha": "fc114851d5017aed7c8d5477b58b2ff8dac6bbfa",
+  "implementation_actor": "corpus_data_team",
+  "merge_authorized": false,
+  "authorization_reference": "User authorized three data preprocessing batches, no main merge requested.",
+  "scope": [
+    "Final121 fixed candidates;42 new extractions;126 incremental semantic decisions;365-candidate end-to-end completion"
+  ],
+  "acceptance_criteria": [
+    "365 unique candidates with365 effective decisions and preserved superseding history",
+    "171 accepted sources:165 new v0.3 extractions and6 reused",
+    "538 reviewed links and393 canonical entities;sourceitem hashes and originalmaster rows preserved",
+    "fixedhead62tests, truehybrid retrieval, boundedI/O under unrelated expansion, saved-byte download/restore"
+  ],
+  "feature_complete": true,
+  "scale_required": true,
+  "tests": [
+    {
+      "role": "developer",
+      "kind": "targeted",
+      "head_sha": "9b7905462f3afb28f26fc9ccd9ab9d2d310059c7",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_corpus_batch.py",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/batch3-fixed-head-developer-targeted.log",
+      "log_sha256": "8bea406e7c063406283fc9519483548b4a1d20826ed9075713227a2c875f8837"
+    },
+    {
+      "role": "developer",
+      "kind": "fast_regression",
+      "head_sha": "9b7905462f3afb28f26fc9ccd9ab9d2d310059c7",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/batch3-fixed-head-developer-full.log",
+      "log_sha256": "e3b2759ebf167fa1d96b757d75638b67783a365aed30afbe57d5b660f4aca5f8"
+    },
+    {
+      "role": "reviewer",
+      "kind": "fast_regression",
+      "head_sha": "9b7905462f3afb28f26fc9ccd9ab9d2d310059c7",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/batch3-fixed-head-regression.log",
+      "log_sha256": "a79f3b28a7a315dde3d23918f0cea8d924b45e5ed6ad4ec513e1d46f00484216"
+    },
+    {
+      "role": "reviewer",
+      "kind": "feature_acceptance",
+      "head_sha": "9b7905462f3afb28f26fc9ccd9ab9d2d310059c7",
+      "command": [
+        "python",
+        "audit_corpus.py",
+        "--through",
+        "3"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/batch3-independent-data-audit.log",
+      "log_sha256": "3b1fd2b660e1ddbecdf7a17145687af6407814b9f0e70b16de9c853de0ef64b2"
+    },
+    {
+      "role": "reviewer",
+      "kind": "scale",
+      "head_sha": "9b7905462f3afb28f26fc9ccd9ab9d2d310059c7",
+      "command": [
+        "python",
+        "final_acceptance.py"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/final-acceptance.log",
+      "log_sha256": "720aa7d06882f830d63d05771fa32e174a25d9606dcc13909bf7255d4f7a8b80"
+    },
+    {
+      "role": "reviewer",
+      "kind": "feature_acceptance",
+      "head_sha": "9b7905462f3afb28f26fc9ccd9ab9d2d310059c7",
+      "command": [
+        "python",
+        "download-hash-restore-hybrid-probe"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/final-saved-restore.log",
+      "log_sha256": "fe11258f0cd07a2649c178efe01fd0401f3409e797dffe492ef326dfad3b3648"
+    }
+  ],
+  "reviews": [
+    {
+      "round": 1,
+      "head_sha": "9b7905462f3afb28f26fc9ccd9ab9d2d310059c7",
+      "remote_head_sha": "9b7905462f3afb28f26fc9ccd9ab9d2d310059c7",
+      "actor": "root plus independent semantic reviewer",
+      "verdict": "pass",
+      "counterexample_note": "121blindscope42field126semantic decisions independently reviewed. Full365 coverage, oldmasterallrows and source-itemhashes preserved; rejected/pending no invented extraction. Real171-source retrieval, zero-change repeats, 500unrelated10MB fixedrow/byte/opcode proof and saved-byte SHA matched restore with all4 denseindexes and0 computedembeddings."
+    }
+  ],
+  "findings": []
+}

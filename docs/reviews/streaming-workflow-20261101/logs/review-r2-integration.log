@@ -1,0 +1,45 @@
+{
+  "result": "PASS",
+  "source_queries": 6,
+  "prepared_papers": 6,
+  "external_submissions": 6,
+  "vectors": 24,
+  "graph": {
+    "phase": "complete",
+    "snapshot_hash": "133c6adae0fdaf340ca7fc8de7a86f26a85f0b6527d2c786a7369421cf2d342b",
+    "candidate_pairs": {
+      "different": 27
+    },
+    "groups": {
+      "accepted": 18
+    },
+    "name_tasks": {
+      "done": 6
+    },
+    "mentions": {
+      "new_entity": 18
+    },
+    "stage_seconds": {
+      "snapshot_import_cpu": 0.07452968799952941,
+      "candidate_graph_cpu": 0.03960808000010729,
+      "jev_pair_wall": 0.0019714940008270787,
+      "jev_group_wall": 0.0022481329997390276,
+      "materialize_cpu": 0.015807963999577623,
+      "name_queued_wait": 0.018449068069458008,
+      "name_external_service": 0.03234505653381348,
+      "jev_final_name_wall": 0.005204005999985384,
+      "retrieval_index_cpu": 0.01975463300004776
+    },
+    "pending_pairs": 0,
+    "pending_groups": 0,
+    "pending_mentions": 0,
+    "started_at": 1793525766.6964734,
+    "completed_at": 1793525766.8732772,
+    "elapsed_wall_seconds": 0.1768038272857666,
+    "jev_request_count": 0,
+    "index_status": "verified",
+    "index_builds": 4,
+    "index_cache_hits": 24,
+    "index_embeddings_computed": 0
+  }
+}

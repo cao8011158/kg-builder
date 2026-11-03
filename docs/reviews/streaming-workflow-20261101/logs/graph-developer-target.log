@@ -1,0 +1,11 @@
+test_build_names_recovery_retrieval_and_immutable_input (test_snapshot_graph.SnapshotGraphTests.test_build_names_recovery_retrieval_and_immutable_input) ... ok
+test_coherence_failure_preserves_pending_and_source_fingerprint (test_snapshot_graph.SnapshotGraphTests.test_coherence_failure_preserves_pending_and_source_fingerprint) ... ok
+test_empty_accepted_snapshot_completes_without_embedding_model (test_snapshot_graph.SnapshotGraphTests.test_empty_accepted_snapshot_completes_without_embedding_model) ... ok
+test_generated_name_requires_final_jev_coherence (test_snapshot_graph.SnapshotGraphTests.test_generated_name_requires_final_jev_coherence) ... ok
+test_pending_pair_and_stale_lease (test_snapshot_graph.SnapshotGraphTests.test_pending_pair_and_stale_lease) ... ok
+test_restored_snapshot_path_and_timestamp_accept_same_bytes_only (test_snapshot_graph.SnapshotGraphTests.test_restored_snapshot_path_and_timestamp_accept_same_bytes_only) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.758s
+
+OK

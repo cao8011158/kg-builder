@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "/workspace/scratch/fb0b6c3eb637/private/parallel60-20261101/independent_integration.py", line 76, in <module>
+    g=SnapshotGraph(root/'prepared.json',root/'graph',client=client,k=2,model=Model());assert g.run()['phase']=='grouped'
+                                                                                              ^^^^^^^
+  File "/workspace/scratch/fb0b6c3eb637/research-knowledge-system/kg-builder/src/kg_builder/snapshot_graph.py", line 600, in run
+    return self.status()
+           ^^^^^^^^^^^^^
+  File "/workspace/scratch/fb0b6c3eb637/research-knowledge-system/kg-builder/src/kg_builder/snapshot_graph.py", line 619, in status
+    a,b=item.get('started_at'),item.get('finished_at')
+        ^^^^^^^^
+AttributeError: 'list' object has no attribute 'get'

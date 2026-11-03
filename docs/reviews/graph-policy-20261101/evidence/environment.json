@@ -1,0 +1,16 @@
+{
+  "python": "3.12.14",
+  "sqlite": "3.53.1",
+  "code_sha": "3995129e8a71e38cd9d7c56d2fd2fe610c8faf89",
+  "packages": {
+    "numpy": "2.5.4",
+    "fastembed": "0.9.1",
+    "hnswlib": "0.8.0",
+    "igraph": "1.0.0",
+    "leidenalg": "0.12.0"
+  },
+  "source_snapshot_hash": "65015c638bb028e74139e248abdfbb391fb8875f3beddb0d5fc47229c4700b41",
+  "graph_policy": "domain-v1",
+  "sources_recollected": false,
+  "extraction_repeated": false
+}

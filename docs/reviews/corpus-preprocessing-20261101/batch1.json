@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "batch_id": "corpus-preprocessing-20261101-batch1",
+  "repository": "cao8011158/kg-builder",
+  "branch": "work/retrieval-pilot-20261031",
+  "base_sha": "24c56654b27b4e7118beb9e8c7a8474ab83f2657",
+  "head_sha": "95eb1f95fa9a06621ab0f39302a9dfed1a5346e8",
+  "target_branch": "main",
+  "target_sha": "fc114851d5017aed7c8d5477b58b2ff8dac6bbfa",
+  "implementation_actor": "corpus_data_team",
+  "merge_authorized": false,
+  "authorization_reference": "User authorized three data preprocessing batches, no main merge requested.",
+  "scope": [
+    "122 fixed candidate records; four-field extraction; incremental semantic review"
+  ],
+  "acceptance_criteria": [
+    "exact scope review coverage",
+    "52 valid new extractions and six reused",
+    "old payload preservation and idempotence",
+    "62 tests and actual current-scale retrieval"
+  ],
+  "feature_complete": true,
+  "scale_required": false,
+  "tests": [
+    {
+      "role": "developer",
+      "kind": "targeted",
+      "head_sha": "e20e63698d80b16e5ba6c0edd2f487f444e11aa4",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_corpus_batch.py",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/runner-developer-targeted.log",
+      "log_sha256": "cbca61ac650f397d6aa207081494544504ddb42d009a596a880ae65b4b790348"
+    },
+    {
+      "role": "developer",
+      "kind": "fast_regression",
+      "head_sha": "e20e63698d80b16e5ba6c0edd2f487f444e11aa4",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/runner-developer-full.log",
+      "log_sha256": "81c25c45fdf265df7563a7d047db1ac76368cb84217706be0286094c34785eac"
+    },
+    {
+      "role": "reviewer",
+      "kind": "fast_regression",
+      "head_sha": "e20e63698d80b16e5ba6c0edd2f487f444e11aa4",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/batch1-fixed-head-regression.log",
+      "log_sha256": "7283a669bbcb32716b45876b41dba42f3ab6cdaea6c30ec016559820477b9cc7"
+    },
+    {
+      "role": "reviewer",
+      "kind": "feature_acceptance",
+      "head_sha": "e20e63698d80b16e5ba6c0edd2f487f444e11aa4",
+      "command": [
+        "python",
+        "independent-data-audit"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/batch1-independent-data-audit.log",
+      "log_sha256": "2258039a7169678639bf15f50495cf4a2a4672a79d210cbda4576113460c60ef"
+    },
+    {
+      "role": "reviewer",
+      "kind": "fast_regression",
+      "head_sha": "95eb1f95fa9a06621ab0f39302a9dfed1a5346e8",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/batch1-round2-fixed-head-regression.log",
+      "log_sha256": "edfd6a65a417825bfbd7bea5793d0a0685649d85bc0dd8aa0b7235e3431f97db"
+    },
+    {
+      "role": "reviewer",
+      "kind": "feature_acceptance",
+      "head_sha": "95eb1f95fa9a06621ab0f39302a9dfed1a5346e8",
+      "command": [
+        "python",
+        "docs/reviews/corpus-preprocessing-20261101/audit_corpus.py",
+        "--through",
+        "1"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/batch1-round2-data-audit.log",
+      "log_sha256": "bf554f88d31544683b88baa1749e0bdca0e7fcc331fd8d82ff59f96355a2a761"
+    },
+    {
+      "role": "developer",
+      "kind": "targeted",
+      "head_sha": "95eb1f95fa9a06621ab0f39302a9dfed1a5346e8",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_corpus_batch.py",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/batch2-developer-targeted.log",
+      "log_sha256": "36ae67ce8b1ac1d05bb586c42d68039ebb092946b5ebf4ee721161ef8cafaafa"
+    },
+    {
+      "role": "developer",
+      "kind": "fast_regression",
+      "head_sha": "95eb1f95fa9a06621ab0f39302a9dfed1a5346e8",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/batch2-developer-full.log",
+      "log_sha256": "a662b5e404bef4a52be3ef6322e9f0de1246aefc63f5fa8b5e2f9b2f838eebef"
+    }
+  ],
+  "reviews": [
+    {
+      "round": 1,
+      "head_sha": "e20e63698d80b16e5ba6c0edd2f487f444e11aa4",
+      "remote_head_sha": "e20e63698d80b16e5ba6c0edd2f487f444e11aa4",
+      "actor": "root",
+      "verdict": "pass",
+      "counterexample_note": "Independent122scope and52field review plus actual SQLite preservation, idempotence, FK/integrity and SAGE/CAT/LoCoMo queries; scope-insufficient source explicitly pending."
+    },
+    {
+      "round": 2,
+      "head_sha": "95eb1f95fa9a06621ab0f39302a9dfed1a5346e8",
+      "remote_head_sha": "95eb1f95fa9a06621ab0f39302a9dfed1a5346e8",
+      "actor": "root",
+      "verdict": "pass",
+      "counterexample_note": "Recovered primary-indexed abstract independently supports LLM-scope exclusion. Append-only adjudication supersedes preserved pending row; no extraction/semantic changes.62tests and fullsource/itemhash preservation/queryaudit pass."
+    }
+  ],
+  "findings": []
+}

@@ -1,0 +1,7 @@
+claim [(7, 0, 62, 'SEARCH t USING INDEX idx_tasks_claim (kind=?)'), (21, 0, 46, 'SEARCH p USING INDEX sqlite_autoindex_papers_1 (paper_id=?)'), (63, 0, 0, 'USE TEMP B-TREE FOR ORDER BY')]
+detail [(5, 0, 46, 'SEARCH t USING INDEX sqlite_autoindex_tasks_1 (task_id=?)'), (12, 0, 46, 'SEARCH p USING INDEX sqlite_autoindex_papers_1 (paper_id=?)')]
+status [(6, 0, 211, 'SCAN tasks USING COVERING INDEX idx_tasks_claim')]
+unrelated 0 claim_vm_approx 0 output_bytes 345 row_count 1
+unrelated 1000 claim_vm_approx 0 output_bytes 2 row_count 0
+fixed target, unrelated 0 VM < 10 internal fetched rows 1 output bytes 232
+fixed target, unrelated 1000 VM < 10 internal fetched rows 1 output bytes 232

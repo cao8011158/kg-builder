@@ -6,9 +6,11 @@ import math
 from jsonschema import Draft202012Validator
 
 SCHEMA_VERSION = 'research-kg-extraction/0.2-draft-pilot'
+RETRIEVAL_SCHEMA_VERSION = 'research-kg-extraction/0.3-retrieval'
 SCHEMAS = {
     None: 'legacy.json',
     SCHEMA_VERSION: 'v0_2_draft.json',
+    RETRIEVAL_SCHEMA_VERSION: 'v0_3_retrieval.json',
 }
 KINDS = {
     'research_problems': 'problem', 'methods': 'method', 'contributions': 'contribution',
@@ -47,7 +49,7 @@ def validate_extraction(payload):
     if not isinstance(payload,dict):
         raise ValueError('Extraction must be a JSON object')
     version = payload['schema_version'] if 'schema_version' in payload else None
-    if 'schema_version' in payload and version != SCHEMA_VERSION:
+    if 'schema_version' in payload and version not in (SCHEMA_VERSION, RETRIEVAL_SCHEMA_VERSION):
         raise ValueError(f'Unknown extraction schema_version: {version!r}')
     if version not in SCHEMAS:
         raise ValueError(f'Unknown extraction schema_version: {version!r}')
@@ -57,6 +59,17 @@ def validate_extraction(payload):
         raise ValueError(f'Extraction schema at {list(error.path)}: {error.message}')
     if version is None:
         return
+    if version == RETRIEVAL_SCHEMA_VERSION:
+        keys={payload['version_id']}
+        for field in ('contributions','research_problems','methods','benchmarks'):
+            for entity in payload[field]:
+                key=entity['key']
+                if key in keys:
+                    raise ValueError(f'Duplicate entity key: {key}')
+                if field == 'contributions' and not key.startswith(payload['version_id']+'#'):
+                    raise ValueError(f'contribution must be scoped to the owning paper version: {key}')
+                keys.add(key)
+        return version
     ids = {payload['version_id']:'paper_version'}
     entities={}
     for field,kind in KINDS.items():

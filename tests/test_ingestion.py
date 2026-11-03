@@ -122,16 +122,11 @@ class IngestionTests(unittest.TestCase):
         with self.assertRaises(ValueError): reconcile([path],self.dir/'new.db',path)
         self.assertFalse((self.dir/'same.db').exists())
 
-    def test_default_collectors_exclude_semantic_scholar(self):
-        config=self.dir/'queries.json'
-        config.write_text(json.dumps({'topic_queries':{'memory':['term']}}))
-        with patch.object(collect_papers,'openalex_search',return_value=iter(())) as oa, \
-             patch.object(collect_papers,'arxiv_search',return_value=iter(())) as ax, \
-             patch.object(collect_papers,'semantic_scholar_search',side_effect=AssertionError('unexpected API')):
-            collect_papers.main(['--db',str(self.dir/'collection.db'),'--query-config',str(config),
-                                 '--manifest',str(self.dir/'manifest.json')])
-        self.assertTrue(oa.called and ax.called)
-        self.assertEqual(len(json.loads((self.dir/'manifest.json').read_text())['queries']),2)
+    def test_historical_collector_cli_is_retired_without_creating_sqlite(self):
+        path=self.dir/'collection.db'
+        with self.assertRaisesRegex(SystemExit,'prepare_pipeline.py.*KG_DATABASE_URL'):
+            collect_papers.main(['--db',str(path)])
+        self.assertFalse(path.exists())
 
     def test_locality_index_plan_and_unrelated_growth(self):
         upsert_paper(self.db,{'title':'Target','doi':'10.1234/target'},'s','target','q')

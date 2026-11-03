@@ -1,0 +1,9 @@
+{
+  "pipeline60-20261101/preparation/workflow.sqlite3": true,
+  "pipeline60-20261101/preparation/master.sqlite3": true,
+  "pipeline60-20261101/preparation/prepared.json": true,
+  "pipeline60-20261101/graph/semantic.sqlite": true,
+  "pipeline60-20261101/graph/graph.sqlite": true,
+  "corpus-20261101/master-working.sqlite3": true,
+  "corpus-20261101/semantic-working.sqlite3": true
+}

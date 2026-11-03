@@ -1,0 +1,13 @@
+test_cli_rejects_output_collisions_before_writing (test_graph_validation.GraphValidationTests.test_cli_rejects_output_collisions_before_writing) ... ok
+test_coherent_all_pending_has_no_quality_claim (test_graph_validation.GraphValidationTests.test_coherent_all_pending_has_no_quality_claim) ... ok
+test_complete_graph_and_labeled_quality_and_read_only_job (test_graph_validation.GraphValidationTests.test_complete_graph_and_labeled_quality_and_read_only_job) ... ok
+test_different_pair_shared_entity_rejected (test_graph_validation.GraphValidationTests.test_different_pair_shared_entity_rejected) ... ok
+test_faults_missing_source_wrong_kind_merge_and_fts (test_graph_validation.GraphValidationTests.test_faults_missing_source_wrong_kind_merge_and_fts) ... ok
+test_item_review_hash_prevents_payload_substitution (test_graph_validation.GraphValidationTests.test_item_review_hash_prevents_payload_substitution) ... ok
+test_master_preserves_source_text_pins_and_extraction (test_graph_validation.GraphValidationTests.test_master_preserves_source_text_pins_and_extraction) ... ok
+test_pending_is_reported_without_quality_pass_claim (test_graph_validation.GraphValidationTests.test_pending_is_reported_without_quality_pass_claim) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 1.829s
+
+OK

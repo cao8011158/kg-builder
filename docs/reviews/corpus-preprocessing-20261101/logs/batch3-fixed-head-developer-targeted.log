@@ -1,0 +1,13 @@
+test_apply_repeat_conflict_and_retention (test_corpus_batch.CorpusBatchTests.test_apply_repeat_conflict_and_retention) ... ok
+test_cli_reports_failure_stage (test_corpus_batch.CorpusBatchTests.test_cli_reports_failure_stage) ... ValueError: Report path must differ from databases and input files
+ok
+test_dry_run_read_only_and_invalid_no_files (test_corpus_batch.CorpusBatchTests.test_dry_run_read_only_and_invalid_no_files) ... ok
+test_real_manifest_pin_metadata_and_excluded_empty_topics (test_corpus_batch.CorpusBatchTests.test_real_manifest_pin_metadata_and_excluded_empty_topics) ... ok
+test_rollback_on_mid_batch_failure (test_corpus_batch.CorpusBatchTests.test_rollback_on_mid_batch_failure) ... ok
+test_sidecar_failure_retry_and_reuse_gate (test_corpus_batch.CorpusBatchTests.test_sidecar_failure_retry_and_reuse_gate) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.190s
+
+OK
+{"batch_id": "b1", "stage": "validated", "papers": 1, "extractions": 1, "reviews": 1, "master_new": 0, "sidecar_imported": 0}

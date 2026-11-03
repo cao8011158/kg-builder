@@ -1,0 +1,46 @@
+{
+  "code_sha": "e6e2c0ad62dc7883d5a84267e5dbb15197ab8a73",
+  "downloaded_package_sha256": "4f84c9bd3d9163506ed2e90dd20c1b10a55d4bec84adb809ab55a0ff7f0631a2",
+  "quick_checks": {
+    "preparation/master.sqlite3": "ok",
+    "preparation/workflow.sqlite3": "ok",
+    "graph/graph.sqlite": "ok",
+    "graph/snapshot-master.sqlite": "ok",
+    "graph/semantic.sqlite": "ok"
+  },
+  "terminal_preparation_wall_preserved": 718.6128830909729,
+  "terminal_graph_wall_preserved": 295.60326623916626,
+  "terminal_replay_api_calls": 0,
+  "cold_dense_index_builds": 4,
+  "cold_index_entity_vectors_recomputed": 0,
+  "queries": [
+    {
+      "kind": "ResearchProblem",
+      "entity_id": "entity:008f9d4b71649ea4f39ea47f03fa96a1",
+      "source_mentions": 1
+    },
+    {
+      "kind": "Method",
+      "entity_id": "entity:0ac099a08c4ce716984d0529636c774b",
+      "source_mentions": 1
+    },
+    {
+      "kind": "Benchmark",
+      "entity_id": "entity:2c0b23bf9dff3387bf78aa9373746d70",
+      "source_mentions": 1
+    }
+  ],
+  "retrieval_stats": {
+    "embedding_cache_hits": 73,
+    "embeddings_computed": 3,
+    "dense_index_builds": 4,
+    "detail_rows": 6
+  },
+  "counts": {
+    "papers": 11,
+    "mentions": 54,
+    "entities": 46,
+    "pending_mentions": 8,
+    "contributions": 27
+  }
+}

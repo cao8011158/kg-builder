@@ -1,0 +1,72 @@
+{
+  "batch": 3,
+  "files": {
+    "batch3-input.json": "eb4c025f8686632ff85b45ed732371a7e3ad41cf9e59c0bbc62594419efe841a",
+    "batch3-reviews.json": "a554c9c58999dbfd08196b566cf0e9d24d4dd213afb8e371275a3f44102e20ba",
+    "batch3-extractions.json": "a9004c35671989d81123153e73424b2bcb07b820affd165a567a6aedef14c54d",
+    "batch3-independent-scope.json": "9c3a4dd5d102c28bdcf25362c653dca903fdebb410dcd3865f66c27012a7fa0f",
+    "batch3-field-review.json": "e4dd986096fc1aa8fe58d66dfcf76f11c06b380088212c81915306328fa3a632",
+    "batch3-scope-adjudication-comparison.json": "a54dbd5e16caf743aba8b9e3b26c758f7101b57f5f61add19fec3341c032b0fd",
+    "batch3-semantic-independent-review.json": "f09da4ef5d12f435d4ad2e7f93fb9f3765949259e4de1962bfdfe3df1b5cb0c9",
+    "batch3-semantic/round-001-decisions.json": "723a8facec84222cbba387daf5d825f7cd61a1a0b538d04fd9c50249dc830cd9",
+    "batch3-semantic/round-001-packet.json": "318c3989d97629305bc3586768a5238ef7e4d97b05d824a493521b7082031292",
+    "batch3-semantic/round-001-review.json": "c7c53df6137ea92439107018771c199f5d9582cccc90f89a602691b8a8f76e76",
+    "batch3-semantic/round-002-decisions.json": "9d15dc571febe1247dc02f1a2ce700f18b89bc618ba4715a572d5944eb6704bc",
+    "batch3-semantic/round-002-packet.json": "0fd3a694cc1b05415f7307e06a3e3d05d66c50ff5e0c0a95a417c565bb34f9a0",
+    "batch3-semantic/round-002-review.json": "4c345485a4fb032de902469af339bb252651edad55a5efde3563f988397cb1c7",
+    "batch3-semantic/round-003-decisions.json": "b6637b831531f76d286d08aa3c5116e34f301d92089e297740c21d946312a2dd",
+    "batch3-semantic/round-003-packet.json": "201d066f56af670a7ee71869c210312180f2e78d4634daca006be863cd61cee2",
+    "batch3-semantic/round-003-review.json": "f182c15f392743544adb65206229edaf799a37c79027b4b3fd08b326e8131284",
+    "batch3-semantic/round-004-decisions.json": "4ded043f1894c4458187e7a6d595ff23dcea06e68d61713dab91bd1578afe43f",
+    "batch3-semantic/round-004-packet.json": "6b9acbd8c68fda810b0e8a65b1bd96bec1c88a276a84ed7a22589436378d1433",
+    "batch3-semantic/round-004-review.json": "a645a6a16cd17d110469840e213e8dcbe89c170900b75ee0aca0a4a4b1da30f5",
+    "batch3-semantic/round-005-decisions.json": "e9128026dfe8a75266b1057328f0ed61eb77914c54ac51ba7fe2e4fa4a5f0c21",
+    "batch3-semantic/round-005-packet.json": "143ef0153426eca17229442c39e90485c2df70b4c7eed8506240bfc9b4cb0a67",
+    "batch3-semantic/round-005-review.json": "85033c437f6a31019de9d397fcae4109949f9cdc9c2f02a42ddffbd355c3a6d0",
+    "batch3-semantic/round-006-decisions.json": "7d195a25c5751164422ca89e8c18e9733e60d3579eb5f5663934112f19773363",
+    "batch3-semantic/round-006-packet.json": "1b1a78bd789d10ecb82c4e0a7f814ea33739688287bab1dfc3f6b2954bc9ba15",
+    "batch3-semantic/round-006-review.json": "3f1d30b59926151170502ea3b03efbee717bf1318e2e2c44ed7ed8cb43ba892a",
+    "batch3-semantic/round-007-decisions.json": "e43e567a7659a29c0032d4dd502ea5db84c2711c0a483ceb00bf2b7782648108",
+    "batch3-semantic/round-007-packet.json": "a0085da5249bb0286598779c321ca9e72349757dbfcbe53d891003c965dc0b61",
+    "batch3-semantic/round-007-review.json": "238023ec6aa209c7f285f1637a89641262e7f0096a9463db14cb0e8469e588f4",
+    "batch3-semantic/summary.json": "a392c5c3529b1040da3ce48eff4e9d5673985411439910ee8e46820f3bcfd7f4",
+    "batch3-semantic/decisions.md": "ec79cb42274e21c820cfb418f8a6c540e30c44969d38ea58fe5b4d7add34a7e9",
+    "missing_sources.json": "c065a98fa09f387ccc080381f4a7f3bdb662a63a3cf32c08402482fbd61c6b29",
+    "exports/processed_corpus.json": "76b71b1220b494ea151a0c892fd19ccc02a669b03c95bf3f17f3d82383c6460d",
+    "exports/research_entities.json": "0bd30e686fdffdf8d0712dd3e243d15008feb8a374acb02213123d5f9658bd77",
+    "exports/retrieval_extractions.json": "acb2dc8ac36eabdebb63e3d87501042620424fcd8ba95d25550eec3822540274",
+    "exports/scope_decisions.json": "9d1d42dd1a809b402c96a1a2b7a42395ac3acc1081323b9df981d5d505a0ade1",
+    "exports/summary.json": "d23119ea7b3a3ed348a74d883d9c5a53f78fd1635d10bab5357a209f20e4a0e7"
+  },
+  "logical_table_hashes": {
+    "master-working.sqlite3": {
+      "papers": "7409f6ec978ca1635ae9383abf51b0f570a5e3f9f3a89e69fbc0f558bce4249c",
+      "paper_versions": "98f2cb05b41fe4709c2929ed8120ecfcd9eb95df4b0f9b1a443537f43ff51a15",
+      "extraction_records": "9b1363b2405e7730c8c8496de9a249824df66d3f0c15ed8fdfd0cac165b41b60",
+      "relevance_reviews": "24b8fc3f4464da99de669ffc1bfdce28a547568e310c484a9da7f7004e7c7e90"
+    },
+    "semantic-working.sqlite3": {
+      "sources": "0631ba24aa147e809367148ba3c24591ece3aa071ef421ffd1e1a5f5d7439585",
+      "mentions": "9d9693e61a8b2c93edb5c74235e1d9bea6be619fd0126421d6ab883076ee368c",
+      "entities": "3d6153b8171161a5ec0bcbd43b2211e2399f01a348523f9cf2e812556a04e38a",
+      "contributions": "87770a9af71a03f6369d8b8182b6e4fb832410f3f83b5089785abf21c6d96579",
+      "reviews": "45d77152c2ca5a0485b47d0ab66fdb579f207bf1c7c5ed24bc5f0e436c460c33"
+    }
+  },
+  "effective_counts": {
+    "candidates": 365,
+    "exclude": 192,
+    "include": 171,
+    "pending": 2,
+    "new_extractions": 165,
+    "reused_extractions": 6,
+    "semantic_sources": 171,
+    "semantic_mentions": 538,
+    "semantic_entities": 393,
+    "entity_kinds": {
+      "Benchmark": 104,
+      "Method": 157,
+      "ResearchProblem": 132
+    }
+  }
+}

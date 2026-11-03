@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "batch_id": "jev-context-20261102",
+  "repository": "cao8011158/kg-builder",
+  "branch": "work/retrieval-pilot-20261031",
+  "base_sha": "7ff332f659d456e2f4403421cdfcf5c6d5b906d2",
+  "head_sha": "6a737f3879d5665f607e6f7c4376cc5d1b439aa6",
+  "target_branch": "main",
+  "target_sha": "fc114851d5017aed7c8d5477b58b2ff8dac6bbfa",
+  "implementation_actor": "jev_semantic_api+jev_prep_runtime+jev_graph_runtime",
+  "merge_authorized": false,
+  "authorization_reference": "User: 先修改代码；另行授权才用之前60样本制图。Existing branch push permission persists; no main merge.",
+  "scope": [
+    "named-option probability",
+    "semantic projection and per-request sharing",
+    "workflow graph audit compatibility",
+    "configurable pinned problem resolution"
+  ],
+  "acceptance_criteria": [
+    "offline native adapters and consumer integration pass",
+    "strict negative probability boundary",
+    "legacy restore unchanged",
+    "protected input hashes unchanged",
+    "no live API or original sample replay"
+  ],
+  "feature_complete": true,
+  "scale_required": false,
+  "tests": [
+    {
+      "role": "developer",
+      "kind": "targeted",
+      "head_sha": "6a737f3879d5665f607e6f7c4376cc5d1b439aa6",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_decision_api.py",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/api-directed.log",
+      "log_sha256": "59ff3cc548ce3c04899dd11979f9f71209c3a26785ad5cfa81f77ec9a71b12c9"
+    },
+    {
+      "role": "developer",
+      "kind": "fast_regression",
+      "head_sha": "6a737f3879d5665f607e6f7c4376cc5d1b439aa6",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/developer-full-frozen.log",
+      "log_sha256": "06c9481bc3aeff5e7484a26e3634562c56ac3c999d3c615a35628c0f9fab5f14"
+    },
+    {
+      "role": "reviewer",
+      "kind": "fast_regression",
+      "head_sha": "6a737f3879d5665f607e6f7c4376cc5d1b439aa6",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/review-r1-full.log",
+      "log_sha256": "5700121cb333e164ce027607e7dac6ef63da2f988c6cd242de154d305b71ee80"
+    },
+    {
+      "role": "reviewer",
+      "kind": "feature_acceptance",
+      "head_sha": "6a737f3879d5665f607e6f7c4376cc5d1b439aa6",
+      "command": [
+        "python",
+        "docs/reviews/jev-context-20261102/offline_acceptance.py"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/review-r1-acceptance.log",
+      "log_sha256": "8012d1e480410a992395bca4b6607274930df194a3c19db691b2b82067f4eb10"
+    }
+  ],
+  "reviews": [
+    {
+      "round": 1,
+      "head_sha": "6a737f3879d5665f607e6f7c4376cc5d1b439aa6",
+      "remote_head_sha": "6a737f3879d5665f607e6f7c4376cc5d1b439aa6",
+      "actor": "root-reviewer",
+      "verdict": "pass",
+      "counterexample_note": "Entire base..head reviewed; native HTTP intercepted integration, probabilities vs confidence, strict boundary, registry sharing, Unicode split binding, old metric and resolution restore, protected six artifact hashes."
+    }
+  ],
+  "findings": [],
+  "step_boundary": "Code plus offline synthetic acceptance only. Real sample graph/scale/accuracy and resolution tuning await explicit later authorization.",
+  "developer_evidence_binding": "Developer runs were precommit against identical production/test content; code SHA tree matches frozen local tree. Reviewer runs executed on fixed remote SHA."
+}

@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "batch_id": "postgres-batch1",
+  "repository": "cao8011158/kg-builder",
+  "branch": "work/retrieval-pilot-20261031",
+  "base_sha": "b070b2b5937948d4f5c0cc17e9148e0779b06906",
+  "head_sha": "cb6d5d92d163dfd3c1bbc93fbaac258cf4da31ea",
+  "target_branch": "main",
+  "target_sha": "fc114851d5017aed7c8d5477b58b2ff8dac6bbfa",
+  "implementation_actor": "pg_developer",
+  "merge_authorized": false,
+  "authorization_reference": "User explicitly prohibits main merge.",
+  "scope": [
+    "Native PostgreSQL source/workflow persistence foundation"
+  ],
+  "acceptance_criteria": [
+    "Reliable-ID dedup, rollback, concurrent initialization and idempotent source/extraction writes"
+  ],
+  "feature_complete": false,
+  "scale_required": false,
+  "tests": [
+    {
+      "role": "reviewer",
+      "kind": "fast_regression",
+      "head_sha": "cb6d5d92d163dfd3c1bbc93fbaac258cf4da31ea",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_*.py",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/batch1-ci/full.log",
+      "log_sha256": "dea821e476e73c03f7dfde0cf7e2057794c3c70d6f62ac346ff8bb5a8bacb1cd"
+    },
+    {
+      "role": "reviewer",
+      "kind": "targeted",
+      "head_sha": "cb6d5d92d163dfd3c1bbc93fbaac258cf4da31ea",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "postgres_integration.py",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/batch1-ci/postgres.log",
+      "log_sha256": "b83979e6780b4c356a89399aa0a178c866ae858ad4a20d7f40de455a1fa92d7f"
+    }
+  ],
+  "reviews": [
+    {
+      "round": 1,
+      "head_sha": "cb6d5d92d163dfd3c1bbc93fbaac258cf4da31ea",
+      "remote_head_sha": "cb6d5d92d163dfd3c1bbc93fbaac258cf4da31ea",
+      "actor": "root-reviewer",
+      "verdict": "pass",
+      "counterexample_note": "Raw native PG integration plus source identity plan proof under2000 unrelated rows. CI virtual merge tree verified identical to fixed head; local historical pacing failure documented."
+    }
+  ],
+  "findings": [],
+  "limitations": [
+    "Preparation entrypoints not yet wired",
+    "No production storage provisioned",
+    "No live semantic calls",
+    "Merge checker intentionally blocked: no merge authorization and developer native targeted evidence pending service at development time."
+  ]
+}

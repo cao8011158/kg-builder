@@ -1,0 +1,9 @@
+{
+  "status": "BLOCKED",
+  "batch_id": "corpus-preprocessing-20261101-batch1",
+  "review_rounds": 1,
+  "reasons": [
+    "Current task merge authorization not recorded"
+  ],
+  "limitation": "Recorded evidence only; independently inspect code, logs, authorization and remote refs."
+}

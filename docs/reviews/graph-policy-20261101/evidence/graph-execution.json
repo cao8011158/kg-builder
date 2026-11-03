@@ -1,0 +1,77 @@
+{
+  "code_sha": "3995129e8a71e38cd9d7c56d2fd2fe610c8faf89",
+  "started_epoch": 1793546538.9523566,
+  "snapshot_path": "/workspace/scratch/fb0b6c3eb637/private/parallel60-20261101/preparation/prepared.json",
+  "generative_api_enabled": false,
+  "graph_policy": "domain-v1",
+  "k": 20,
+  "batch_size": 64,
+  "jev_concurrency": 4,
+  "name_concurrency": 3,
+  "completed_epoch": 1793546948.629715,
+  "process_wall_seconds": 409.6770963120034,
+  "exit_code": 0,
+  "status": {
+    "phase": "complete",
+    "graph_policy": "domain-v1",
+    "snapshot_hash": "65015c638bb028e74139e248abdfbb391fb8875f3beddb0d5fc47229c4700b41",
+    "research_areas": 1,
+    "retained_memberships": 227,
+    "excluded_memberships": 0,
+    "identity_conflicts": [],
+    "candidate_pairs": {
+      "different": 2317,
+      "pending": 28,
+      "same": 26
+    },
+    "groups": {
+      "accepted": 155
+    },
+    "name_tasks": {
+      "done": 1
+    },
+    "mentions": {
+      "new_entity": 229
+    },
+    "stage_seconds": {
+      "snapshot_import_cpu": 0.5474888019998616,
+      "candidate_graph_cpu": 0.1285552250010369,
+      "jev_api_request_seconds": 1196.9437389170052,
+      "jev_api_elapsed_seconds": 1197.002737192015,
+      "jev_retry_count": 0.0,
+      "jev_pair_wall": 327.93390695900234,
+      "jev_member_wall": 24.195603244999802,
+      "materialize_cpu": 0.08380364501499571,
+      "name_queued_wait": 45.50388956069946,
+      "name_external_service": 0.33062195777893066,
+      "jev_area_member_wall": 8.40718651700081,
+      "retrieval_index_cpu": 1.6903202009998495
+    },
+    "pending_pairs": 28,
+    "pending_groups": 0,
+    "pending_mentions": 0,
+    "started_at": 1793546539.154541,
+    "completed_at": 1793546948.6255746,
+    "elapsed_wall_seconds": 409.47103357315063,
+    "jev_request_count": 153,
+    "jev_request_peak_concurrency": 4,
+    "jev_request_wall_union_seconds": 359.63507652282715,
+    "jev_logical_request_intervals": 153,
+    "jev_http_attempt_intervals": 153,
+    "jev_client_concurrency": {
+      "active": 0,
+      "peak_active": 4,
+      "started": 153,
+      "finished": 153,
+      "queued": 0,
+      "peak_queued": 1,
+      "cumulative_queue_duration_s": 0.0017222579990630038,
+      "cumulative_request_duration_s": 1196.9437389170052,
+      "request_wall_union_s": 359.63506444999075
+    },
+    "index_status": "verified",
+    "index_builds": 5,
+    "index_cache_hits": 328,
+    "index_embeddings_computed": 1
+  }
+}

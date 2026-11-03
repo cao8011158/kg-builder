@@ -1,0 +1,51 @@
+{
+  "batch": 2,
+  "files": {
+    "batch2-input.json": "94b897fd7cd729d0cd0ba34a5b404d6541033fe5ebcf076cd80e0bf2525fee7a",
+    "batch2-reviews.json": "511ec31e1b1449324b8fae94368690b1c84b0cb36006741452190d41857e5da7",
+    "batch2-extractions.json": "af7635c11fbf209dfb9e5d71634ecce5f6e4286a6f52d7cd5cc259d8fde90cac",
+    "batch2-independent-scope.json": "2783b6c4cd13efad735ae765cf1e9d349be2b2e79bed5297940fc263026fd7d6",
+    "batch2-field-review.json": "cc34eca3abfd4c80f60b9a698fbd110700a75eaffdceac84735a0b0570419eb5",
+    "batch2-scope-adjudication-comparison.json": "8d482e21daae2f845043db94d861d93feae4b46fd6f56e614e362cb3341fcd4d",
+    "batch2-semantic/round-001-packet.json": "d6e0fbe44e66d0868fbc6de4bbf03835aec62e8e92d5c0df92d3add0925df4fe",
+    "batch2-semantic/round-002-packet.json": "e99627659749df16c30159386ff8af7462e5e98a2866033e20db925952a354fe",
+    "batch2-semantic/round-003-packet.json": "2dd113cf1f7cf83dbae566c40962e2ee043728fcdc9f74219299ce1ac6a9a23b",
+    "batch2-semantic/round-004-packet.json": "d100e2a47da196c3d75c82139b5c5981fa15d693f1f6d0c9b8d1460488dc6677",
+    "batch2-semantic/round-005-packet.json": "e2ac54d4e98619e152e8692e2fba0fde907eabb960241b74cd3513282a737cc9",
+    "batch2-semantic/round-006-packet.json": "dccfd5d729a86231b18cef1aa6550bab12891ece3e3f4a03f90f18a10c9c4759",
+    "batch2-semantic/round-007-packet.json": "b57652772151cc84a03480abfca80446dbb6117f161d6d18a562bd93ccb73bc6",
+    "batch2-semantic/round-008-packet.json": "07ac6a7efd68ec4c0dcc4ca1f93ea175ea1b65f0500e0517d8071490256c7d0c",
+    "batch2-semantic/round-009-packet.json": "1816dacbda5f50a28b908cf4666aa974b35bf08612fd3802dd59c7829d09adab",
+    "batch2-semantic/round-010-packet.json": "9dbc8683a4140ff447fb4ef7bb8717a46a7bac97f58dc1e68add49ed54f9e3f4",
+    "batch2-semantic/round-011-packet.json": "eecc1e4573b85a9d263661b56a5884b9696e53ceebd9dd08fe1a60d1e385b630",
+    "batch2-semantic/round-001-review.json": "114e020a713c89bece50e95763efc290751cf5ecd6ec5eb5f27d13a20e0d27ba",
+    "batch2-semantic/round-002-review.json": "9be1eba0e24a992ed03d54e7cda9d642c920b4cfc9c20e71c54ad66608796803",
+    "batch2-semantic/round-003-review.json": "cd6207b4d72dfefd20d67f6b5cfc961f6d5b2b32ad077662248ba4b61a59a156",
+    "batch2-semantic/round-004-review.json": "657eff7e7ed2607de2c878cb858d39b86c2634268ce7a03e415a67e8d158c278",
+    "batch2-semantic/round-005-review.json": "a9312e7d75bd966d6a94c0e5bb52d2f8582a49ec7e8c95a254b11f8d3c8de3c9",
+    "batch2-semantic/round-006-review.json": "7f7c1559a8383bd2c9259b95bde1071f3d0c493fcef58e5608be00ddb7909264",
+    "batch2-semantic/round-007-review.json": "36ba62217856f9d7e0c17aba24c74a5fbde1180b03cdc33a3b26ffdc0c2ffcb3",
+    "batch2-semantic/round-008-review.json": "b5a633898c00157b922efffc635acd738309666712c8feb1040ec498ed4082bb",
+    "batch2-semantic/round-009-review.json": "cae4161a9213173517532044b7974c4539e0ae23e1ef4905c25a44ee64a1998f",
+    "batch2-semantic/round-010-review.json": "6610e759da764d5dc4dcc5eeb53abea8fb662ccf20fb6c02b447d9c83cd04e87",
+    "batch2-semantic/round-011-review.json": "d22a2900c6ce9bb373d150a73d9eebf1e7c7c20420df5616c6e597d80bbc1e74",
+    "batch2-semantic/summary.json": "2cd61d6b771e8e79062a7f23f532b3108ac66cbdadee64477d87aa1cfdfe1426",
+    "batch2-semantic/decisions.md": "1f4565de6809680147de977f9180fce3840ad60cb272c5af3f8aa1fc383f8d4e",
+    "batch2-semantic-independent-review.json": "7be93661e8b1ef2e38353601e45270a42917de7bf409aeddf5091c0ae0a3db09"
+  },
+  "logical_table_hashes": {
+    "master-working.sqlite3": {
+      "papers": "7409f6ec978ca1635ae9383abf51b0f570a5e3f9f3a89e69fbc0f558bce4249c",
+      "paper_versions": "98f2cb05b41fe4709c2929ed8120ecfcd9eb95df4b0f9b1a443537f43ff51a15",
+      "extraction_records": "887601a4766189b89d582f55580fbec610ea85c254e7891787728beccc0c7e65",
+      "relevance_reviews": "e17e6512b9a68e415358a5c358b7c5d778c6083cf4adc3349dc609b1b1aeff1b"
+    },
+    "semantic-working.sqlite3": {
+      "sources": "de157459a9497dc8bceade461ec4709ac109b8d5c79aed10eb96deff6fcc182a",
+      "mentions": "964f90126e8d0fc15e95c23836e5b9b6dc72eb90ef4cef1690628c5885395b3a",
+      "entities": "5d6aceec9e1c34d73c7df4c4946b981b95bd114b80643465aafa43c7efc70e87",
+      "contributions": "d4f6f386fc9c699f81dd0af8c1c0a9e1a1ab305d17837f60b27fc2cd3b8255b8",
+      "reviews": "410843f57cb3b8cdaf8f1934b638620a1aee435aee8b4c9a15b9a68b39f96dd9"
+    }
+  }
+}

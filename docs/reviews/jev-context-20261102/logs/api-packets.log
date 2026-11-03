@@ -1,0 +1,5 @@
+cold_8 calls 1 state_bytes 792 packet_bytes 4657 source_occurrences 1 entity_count 0 question_count 8
+hot_8 calls 1 state_bytes 792 packet_bytes 4657 source_occurrences 1 entity_count 0 question_count 8
+unrelated_admin_8 calls 1 state_bytes 792 packet_bytes 4657 source_occurrences 1 entity_count 0 question_count 8
+A20 calls 1 state_bytes 1811 packet_bytes 14430 source_occurrences 0 entity_count 21 question_count 20
+A20_versions state_bytes 2459 packet_bytes 15078 entities 21 questions 20

@@ -1,0 +1,203 @@
+{
+  "schema_version": 1,
+  "batch_id": "graph-policy-20261101",
+  "repository": "cao8011158/kg-builder",
+  "branch": "work/retrieval-pilot-20261031",
+  "base_sha": "e873c43c0bc022ba43daee257813d43878577fe2",
+  "head_sha": "3995129e8a71e38cd9d7c56d2fd2fe610c8faf89",
+  "target_branch": "main",
+  "target_sha": "fc114851d5017aed7c8d5477b58b2ff8dac6bbfa",
+  "implementation_actor": "graph_policy_store+graph_policy_graph+graph_policy_validation",
+  "merge_authorized": false,
+  "authorization_reference": "User authorized graph policy update, frozen46 replay, live Jev and test report. New issues discussed before handling. Prior branch push authorization persists; main merge not authorized.",
+  "scope": [
+    "Separate ResearchProblem and ResearchArea",
+    "Strict per-member negative >0.7 exclusion",
+    "Methods and benchmarks identity with searchable singleton fallback",
+    "No pending-edge blanket blockade",
+    "Structural and matched frozen-case evaluation"
+  ],
+  "acceptance_criteria": [
+    "All approved source items searchable",
+    "Actual Leiden groups summarized before area member review",
+    "Exact source pins and strict exclusion evidence",
+    "Legacy compatibility and no-API restore",
+    "Report measured effect and consult on new issues"
+  ],
+  "feature_complete": true,
+  "scale_required": true,
+  "tests": [
+    {
+      "role": "developer",
+      "kind": "targeted",
+      "head_sha": "3995129e8a71e38cd9d7c56d2fd2fe610c8faf89",
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_graph_validation.py"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/validator-targeted.log",
+      "log_sha256": "15782b58bbf643efa65649d22ca16a19edb2301e605ee1a789bdb7ae4b61dcfd"
+    },
+    {
+      "role": "developer",
+      "kind": "fast_regression",
+      "head_sha": "3995129e8a71e38cd9d7c56d2fd2fe610c8faf89",
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/validator-full.log",
+      "log_sha256": "91f7c0991270f6a6ef5492e88f3198bcba11acdf6767060e8bc6240a3b60f138"
+    },
+    {
+      "role": "reviewer",
+      "kind": "fast_regression",
+      "head_sha": "3995129e8a71e38cd9d7c56d2fd2fe610c8faf89",
+      "command": [
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-v"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/review-r1-full.log",
+      "log_sha256": "01efbf392c45f475ddcd981e95848acbb970968b153cd1707ed51a7c2c06210b"
+    },
+    {
+      "role": "reviewer",
+      "kind": "targeted",
+      "head_sha": "3995129e8a71e38cd9d7c56d2fd2fe610c8faf89",
+      "command": [
+        "python",
+        "independent_review.py"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/review-r1-integration.log",
+      "log_sha256": "84f84e2dd3f8e0809abad5c64292123f2531b1de0acf1e73e14908ecbf03f235"
+    },
+    {
+      "role": "reviewer",
+      "kind": "scale",
+      "head_sha": "3995129e8a71e38cd9d7c56d2fd2fe610c8faf89",
+      "command": [
+        "python",
+        "evaluate.py"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/live-acceptance.log",
+      "log_sha256": "fd1d6e63ce676d9a0917facccc4eac3ade34434ca878ec6183ef3aec50142481"
+    },
+    {
+      "role": "reviewer",
+      "kind": "feature_acceptance",
+      "head_sha": "3995129e8a71e38cd9d7c56d2fd2fe610c8faf89",
+      "command": [
+        "python",
+        "verify_restore.py"
+      ],
+      "result": "pass",
+      "exit_code": 0,
+      "log": "logs/restore-acceptance.log",
+      "log_sha256": "338bd6ffb7e69f616ee3c3d4f793dab7d611e4f8f9ad2c535257ebdfffb66b06"
+    }
+  ],
+  "reviews": [
+    {
+      "round": 1,
+      "head_sha": "3995129e8a71e38cd9d7c56d2fd2fe610c8faf89",
+      "remote_head_sha": "3995129e8a71e38cd9d7c56d2fd2fe610c8faf89",
+      "actor": "root-reviewer",
+      "verdict": "pass",
+      "counterexample_note": "127 independent full tests; actual helper/run/claim/submit/validation flow on3sources verifies strict boundary, post-generation area review, independent source nodes, uncertain-edge isolation,5cached indexes and no-API terminal replay."
+    }
+  ],
+  "findings": [
+    {
+      "id": "G-P3-CLI",
+      "severity": "P3",
+      "confirmed": true,
+      "blocking": false,
+      "state": "open",
+      "location": "src/kg_builder/semantic_cli.py:28",
+      "description": "Explicit CLI --kind lacks ResearchArea. Python filtered search and CLI default mixed search work. Reported, no unapproved change.",
+      "discovered_in_batch": "graph-policy-20261101",
+      "owner_step": "graph-policy-20261101",
+      "owner_batch": "graph-policy-20261101",
+      "origin": "current",
+      "dependency_core": false,
+      "route": "user discussion"
+    },
+    {
+      "id": "G-SEM-01",
+      "severity": "P2",
+      "confirmed": true,
+      "blocking": false,
+      "state": "open",
+      "description": "MemGallery identity pending, reference same remains separate",
+      "discovered_in_batch": "graph-policy-20261101",
+      "owner_step": "graph-policy-20261101",
+      "owner_batch": "graph-policy-20261101",
+      "origin": "prior_semantic_limit",
+      "dependency_core": false,
+      "route": "user discussion before policy change"
+    },
+    {
+      "id": "G-SEM-02",
+      "severity": "P2",
+      "confirmed": true,
+      "blocking": false,
+      "state": "open",
+      "description": "LongMemEval-S identity pending, reference same remains separate",
+      "discovered_in_batch": "graph-policy-20261101",
+      "owner_step": "graph-policy-20261101",
+      "owner_batch": "graph-policy-20261101",
+      "origin": "prior_semantic_limit",
+      "dependency_core": false,
+      "route": "user discussion before policy change"
+    },
+    {
+      "id": "G-SEM-03",
+      "severity": "P2",
+      "confirmed": true,
+      "blocking": false,
+      "state": "open",
+      "description": "SWE-bench Verified reference pair not recalled at unchangedk20",
+      "discovered_in_batch": "graph-policy-20261101",
+      "owner_step": "graph-policy-20261101",
+      "owner_batch": "graph-policy-20261101",
+      "origin": "prior_semantic_limit",
+      "dependency_core": false,
+      "route": "user discussion before policy change"
+    },
+    {
+      "id": "G-SEM-04",
+      "severity": "P2",
+      "confirmed": true,
+      "blocking": false,
+      "state": "open",
+      "description": "Leiden57/1/1 yields onebroad area; no unapproved parameter tuning",
+      "discovered_in_batch": "graph-policy-20261101",
+      "owner_step": "graph-policy-20261101",
+      "owner_batch": "graph-policy-20261101",
+      "origin": "observed_quality_limit",
+      "dependency_core": false,
+      "route": "user discussion before policy change"
+    }
+  ]
+}

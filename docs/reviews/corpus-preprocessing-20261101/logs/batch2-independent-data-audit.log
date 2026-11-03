@@ -1,0 +1,13 @@
+ORIGINAL_METADATA_AND_PAYLOADS_UNCHANGED 46
+BATCH 1 {'exclude': 63, 'include': 58, 'pending': 1} new 52 scopes {'primary_source_abstract_review': 4, 'abstract_only_metadata_snapshot': 47, 'full_text_selected_sections': 1}
+BATCH 2 {'include': 71, 'exclude': 50, 'pending': 1} new 71 scopes {'abstract_only_metadata_snapshot': 66, 'primary_source_abstract_review': 4, 'full_text_selected_sections': 1}
+SUPERSEDING_SOURCE_ADJUDICATION doi:10.2139/ssrn.7162978 exclude
+SEMANTIC_EXACT_SOURCE_ITEM_HASHES_PASS 412 mentions 129 contributions
+ENTITY_KINDS {'Benchmark': 77, 'Method': 120, 'ResearchProblem': 98}
+SHARED [('benchmark:locomo', 21), ('method:cat', 2), ('method:sage', 3)]
+INDEXED_DETAIL_PLAN [(4, 0, 62, 'SEARCH mentions USING INDEX mentions_entity (entity_id=?)')]
+ACTUAL_HYBRID_QUERY SAGE TOP method:sage
+ACTUAL_HYBRID_QUERY CAT TOP method:cat
+ACTUAL_HYBRID_QUERY LoCoMo TOP benchmark:locomo
+BOUNDED_ENTITY_READ_ROWS 3
+AUDIT_PASS 244 candidates 129 included 123 new_extractions

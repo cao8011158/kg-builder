@@ -1,0 +1,114 @@
+name: PostgreSQL preparation
+
+on:
+  push:
+    branches: [work/retrieval-pilot-20261031]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kg_test
+          POSTGRES_PASSWORD: ci_test_only_password
+          POSTGRES_DB: kg_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kg_test -d kg_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # This URL is scoped to the disposable Actions service, never a production DB.
+      KG_TEST_DATABASE_URL: postgresql://kg_test:ci_test_only_password@localhost:5432/kg_test
+      KG_DATABASE_URL: postgresql://kg_test:ci_test_only_password@localhost:5432/kg_test
+      PYTHONPATH: src
+      PYTHONFAULTHANDLER: '1'
+      HNSWLIB_NO_NATIVE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert checked-out source head
+        shell: bash
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          actual=$(git rev-parse HEAD)
+          test "$actual" = "$EXPECTED_HEAD_SHA"
+          mkdir -p "$RUNNER_TEMP/pg-test-logs"
+          printf '{"expected_head":"%s","checked_out_head":"%s"}\n' "$EXPECTED_HEAD_SHA" "$actual" | tee "$RUNNER_TEMP/pg-test-logs/checkout-head.json"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install package and test dependencies
+        run: |
+          python -m pip cache remove hnswlib
+          python -m pip install --no-cache-dir --no-binary hnswlib -e '.[semantic]' pytest
+      - name: Mask disposable connection details
+        run: |
+          echo '::add-mask::ci_test_only_password'
+          echo "::add-mask::$KG_TEST_DATABASE_URL"
+      - name: Inspect PostgreSQL test storage
+        env:
+          KG_TEST_EVIDENCE_DIR: ${{ runner.temp }}/pg-test-logs
+          PG_SERVICE_CONTAINER: ${{ job.services.postgres.id }}
+        run: python docs/reviews/postgres-preparation-20261102/storage_environment.py
+      - name: PostgreSQL integration
+        shell: bash
+        run: |
+          set -o pipefail
+          for suite in postgres_integration.py postgres_preparation.py postgres_full_preparation.py; do
+            test -f "tests/$suite" || { echo "Missing PostgreSQL suite: $suite"; exit 1; }
+          done
+          python -m unittest discover -s tests -p 'postgres*.py' -v 2>&1 | tee "$RUNNER_TEMP/pg-test-logs/postgres.log"
+          grep -Eq 'Ran [1-9][0-9]* tests?' "$RUNNER_TEMP/pg-test-logs/postgres.log"
+      - name: Independent source locality
+        shell: bash
+        env:
+          KG_TEST_EVIDENCE_DIR: ${{ runner.temp }}/pg-test-logs
+        run: |
+          set -o pipefail
+          python docs/reviews/postgres-preparation-20261102/source_locality.py 2>&1 | tee "$RUNNER_TEMP/pg-test-logs/source-locality.log"
+      - name: Full regression
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tee "$RUNNER_TEMP/pg-test-logs/full.log"
+      - name: Acceptance scope
+        run: echo 'Fresh 60-record acceptance is pending the workflow integration batch; this job checks the foundation only.'
+      - name: Sanitize test logs for artifact
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/pg-test-artifact"
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          source = Path(os.environ['RUNNER_TEMP']) / 'pg-test-logs'
+          output = Path(os.environ['RUNNER_TEMP']) / 'pg-test-artifact'
+          secrets = [os.environ['KG_TEST_DATABASE_URL'], os.environ['KG_DATABASE_URL'], 'ci_test_only_password']
+          for path in (*source.glob('*.log'), *source.glob('*.json')):
+              content = path.read_text(errors='replace')
+              for secret in secrets:
+                  content = content.replace(secret, '[REDACTED]')
+              (output / path.name).write_text(content)
+          PY
+      - name: Upload sanitized test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgres-preparation-tests
+          path: ${{ runner.temp }}/pg-test-artifact/
+          if-no-files-found: error
+          retention-days: 14
