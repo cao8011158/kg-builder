@@ -53,7 +53,7 @@ jobs:
       - name: Install package and test dependencies
         run: |
           python -m pip cache remove hnswlib
-          python -m pip install --no-cache-dir --no-binary hnswlib -e '.[semantic]' pytest
+          python -m pip install --no-cache-dir --no-binary hnswlib -e '.[semantic,bm25]' pytest
       - name: Mask disposable connection details
         run: |
           echo '::add-mask::ci_test_only_password'
