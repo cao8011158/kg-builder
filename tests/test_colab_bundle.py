@@ -143,3 +143,18 @@ def test_colab_python_cells_parse():
     document = (Path(__file__).resolve().parents[1] / 'docs/COLAB_KG_RUNTIME.md').read_text()
     for cell in document.split('```python\n')[1:]:
         ast.parse(cell.split('```', 1)[0])
+
+
+def test_colab_meta_and_official_mcp_contract():
+    document = (Path(__file__).resolve().parents[1] / 'docs/COLAB_KG_RUNTIME.md').read_text()
+    configuration = document.index('dbms.security.procedures.unrestricted=apoc.meta.*')
+    startup = document.index('runuser -u kgneo -- "$NEO_HOME/bin/neo4j" start')
+    restore = document.index("'restore-neo4j', str(KG_BUNDLE)")
+    meta_probe = document.index('CALL apoc.meta.schema({sample: 100})')
+    handshake = document.index('async with Neo4jMCPTools() as tools:')
+    assert configuration < startup < restore < meta_probe < handshake
+    assert "'apoc.meta.schema' in procedures" in document
+    assert "'neo4j-mcp-server==1.6.1', 'mcp>=1.30,<2'" in document
+    assert "'neo4j_get_schema', 'neo4j_read_cypher'" in document
+    assert "'NEO4J_MCP_READ_ONLY'] = 'true'" in document
+    assert "'NEO4J_MCP_TOOLS'] = 'get-schema,read-cypher'" in document

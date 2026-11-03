@@ -1,6 +1,6 @@
 # Colab native data bundle — development stage
 
-Current status: independent formal review round **1/3 needs changes** at `c75e4a091d7bfa8984235217b294afcba6117cfe`. BUNDLE-01 and BUNDLE-02 are open; no export/restore/push/merge performed. Detailed review: [REVIEW.md](REVIEW.md).
+Current status: independent formal review round **2/3 needs changes** at `061e671dadda0d4fb1f4e5ff44341f8fcc6e1666`. BUNDLE-01 and BUNDLE-02 are closed; new BUNDLE-03 is open. No real export/restore/push/merge performed. Detailed review: [REVIEW.md](REVIEW.md).
 
 ## Scope and baseline
 
@@ -22,13 +22,13 @@ Current status: independent formal review round **1/3 needs changes** at `c75e4a
 
 `python scripts/colab_data_bundle.py verify data/full-graph-20261103/colab-bundle-v1`
 
-`python scripts/colab_data_bundle.py extract /content/drive/MyDrive/colab-bundle-v1.zip /content/kg-bundle`
+`python scripts/colab_data_bundle.py extract /content/drive/MyDrive/research-agent-colab-kg/colab-bundle-v1.zip /content/kg-bundle`
 
 `python scripts/colab_data_bundle.py restore-postgres /content/kg-bundle`
 
 `python scripts/colab_data_bundle.py restore-neo4j /content/kg-bundle`
 
-For restore, set `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` for the newly created database and `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, and optionally `NEO4J_DATABASE` for the empty Neo4j store. Set values through Colab runtime secrets or environment, never CLI arguments. Provision PostgreSQL 16 and Neo4j Community 5.26.32 separately before restore. Neo4j MCP deployment requires compatible APOC installation and belongs to the runtime integration stage.
+For restore, set `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` for the newly created database and `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, and optionally `NEO4J_DATABASE` for the empty Neo4j store. Set values through Colab runtime secrets or environment, never CLI arguments. The Colab runtime guide provisions PostgreSQL 16, Neo4j Community 5.26.32, bundled APOC Core, and the official read-only Neo4j MCP server.
 
 ## Validation
 
@@ -54,3 +54,21 @@ Reviewed the entire `29f4f4907295caeabf2cc972fc417dc5df6fea98..c75e4a091d7bfa898
 - Native read-only identity/type audit succeeded: graph complete, 36,502 nodes, 38,125 relationships across all five types; current property values are JSON-compatible strings/lists. No source writes, export, restore, provider calls, push or merge.
 - Native restore/full corpus/Colab service bootstrap/Drive transfer and persistent HNSW integration remain unverified. The runtime integration stage must supply Java 21, Neo4j 5.26.32 and compatible bundled APOC, and PostgreSQL 16 under a service user. Four synthetic tests are not native or full acceptance.
 - Result: **needs changes**. Completed review count now **1/3**. Apply the two scoped fixes, preserve baseline-error evidence and rerun review against the repaired SHA. Raw local logs and full evidence/repair instructions are listed in [REVIEW.md](REVIEW.md).
+
+## Independent review stage — round 2/3 — 2026-11-04
+
+Reviewed the complete five-file batch at `061e671dadda0d4fb1f4e5ff44341f8fcc6e1666`, including new runtime service documentation, against unchanged base `29f4f4907295caeabf2cc972fc417dc5df6fea98`. Remote head remains unverified; local fixed-commit review only.
+
+- **BUNDLE-01 closed:** only the outer manifest is excluded; BM25/dense/HNSW manifests are hashed and archived. Independent actual `export_bundle` → ZIP → `extract_zip` synthetic orchestration confirms all three manifests survive and inventories agree.
+- **BUNDLE-02 closed:** counts now belong to one managed transaction attempt and only the successful callback result is used. Independent full/partial retry tests pass.
+- **BUNDLE-03 P2 open:** new Colab Neo4j setup copies APOC but omits meta-procedure unrestriction and checks only `apoc.version()`. The official self-hosted APOC meta contract requires unrestriction; MCP requires the meta component. Add `dbms.security.procedures.unrestricted=apoc.meta.*`, appropriate allowlist, an actual post-restore meta query/procedure check, and the precise pinned MCP setup/owning harness instructions. This is a current-step bootstrap integration defect, not an upstream defect. Full evidence and official links are in REVIEW.md.
+- Independent target tests **10 passed in 6.01s**; ordinary regression **128 in 31.236s: 126 passed, 1 skipped, 1 existing SQLite cleanup WinError 32 error, exit 1 — not green**. Python-cell AST checks and patch sanity passed. Colab services were not installed or run.
+- No real export, restore, Drive transfer, source mutation, paid API call, push or merge. Real HNSW/native recovery and actual MCP/Colab acceptance remain pending after implementation approval.
+- Result **needs changes**; completed count **2/3**. One final repair/review round remains. Preserve both earlier review history and baseline-error evidence.
+
+## Repair after independent review round 2
+
+- Fixed BUNDLE-03 in `docs/COLAB_KG_RUNTIME.md`: fresh Neo4j config now unrestricts only `apoc.meta.*` before startup. After restoring the published graph, the notebook checks `apoc.meta.schema` presence and runs `CALL apoc.meta.schema({sample: 100})` against actual data. It then starts the official `neo4j-mcp-server==1.6.1` through the research-agent harness and MCP SDK `>=1.30,<2`, checks the exact two read tools, and calls both schema and parameterized read-query tools.
+- The recipe clones the intended public `codex/colab-kg` and `codex/kg-harness` branches after their publication. It keeps `NEO4J_MCP_*` credentials in environment variables and does not use CLI password arguments.
+- The document contract regression now checks config-before-start, meta-after-restore, server/SDK pins, environment/read-only flags, and the exact harness tool names. Final focused rerun: `11 passed in 13.78s`; Colab Python cells parse. The implementation module and CLI did not change in this repair, so the prior full ordinary regression and its one known Windows SQLite cleanup error remain the latest general regression evidence. Native Linux/Colab service execution remains unverified.
+- Formal review counter remains **2/3**; final independent review against the new commit will be round **3/3**. No source database/service changes, full export, Drive transfer, or merge occurred here.
