@@ -1,0 +1,1 @@
+{"count": 2, "dimension": 2, "format": "kg-hnsw/1", "index_sha256": "e2ef86160788c69c24f0782fc1ba3a8ee64b02adc32fba79a6898be9ba490e0b", "mapping_sha256": "bc5f1fd37f124a7dc01a73f14d4ec18f8e7b6fba58a1f9160a8300f4bf0c7430", "model_id": "fixture:windows-0.8", "next_label": 2, "seed": 42, "vectors_sha256": "c74f298838ad3bca9dc3bef3f538fb9824ef14b4fcfd2fb95077fee0124eceee"}

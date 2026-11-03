@@ -13,6 +13,7 @@ dependencies = ["jsonschema>=4.23,<5", "psycopg[binary]>=3.2,<4", "psycopg-pool>
 neo4j = ["neo4j>=5.26,<7"]
 semantic = ["numpy>=1.26,<3", "fastembed>=0.7,<1", "hnswlib>=0.8,<1", "igraph>=0.11,<2", "leidenalg>=0.10,<1"]
 bm25 = ["bm25s>=0.2.14,<0.3"]
+retrieval = ["numpy>=1.26,<3", "hnswlib>=0.8,<1", "bm25s>=0.2.14,<0.3", "voyageai>=0.5,<1"]
 voyage = ["numpy>=1.26,<3", "voyageai>=0.5,<1", "tokenizers>=0.20,<1"]
 
 [tool.setuptools.packages.find]

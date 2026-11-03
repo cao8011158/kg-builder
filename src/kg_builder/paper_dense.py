@@ -6,7 +6,7 @@ from pathlib import Path
 import uuid
 
 from .semantic_store import SemanticStore, digest
-from .vector_index import HNSWIndex
+from .vector_index import HNSWIndex, _publish_directory
 
 FORMAT = 'kg-paper-dense/1'
 
@@ -78,6 +78,7 @@ def build(run_id: str, index_dir: str | Path, model, *, database_url: str | None
             previous=json.loads((target/'manifest.json').read_text(encoding='utf-8'))
             if previous!=manifest:raise ValueError('Paper dense index source or model differs')
             _cached_vectors(store.db,model.model_id,[row['text_hash'] for row in records])
+            HNSWIndex.load(target/'hnsw',expected_model_id=model.model_id)
             return previous
         for start in range(0,len(records),batch_size):
             chunk=records[start:start+batch_size]
@@ -89,15 +90,21 @@ def build(run_id: str, index_dir: str | Path, model, *, database_url: str | None
         staging=target.parent/('.'+target.name+'-'+uuid.uuid4().hex+'.tmp')
         staging.mkdir()
         try:
+            vectors=_cached_vectors(store.db,model.model_id,[row['text_hash'] for row in records])
+            HNSWIndex({row['node_id']:vectors[row['text_hash']] for row in records},
+                      model_id=model.model_id).save(staging/'hnsw')
             (staging/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2,
                 sort_keys=True),encoding='utf-8')
             (staging/'records.json').write_text(json.dumps([{k:v for k,v in row.items() if k!='abstract'}
                 for row in records],ensure_ascii=False,sort_keys=True),encoding='utf-8')
-            staging.rename(target)
+            _publish_directory(staging,target)
         finally:
             if staging.exists():
                 (staging/'manifest.json').unlink(missing_ok=True)
                 (staging/'records.json').unlink(missing_ok=True)
+                if (staging/'hnsw').exists():
+                    for path in (staging/'hnsw').iterdir():path.unlink()
+                    (staging/'hnsw').rmdir()
                 staging.rmdir()
         return manifest
     finally:
@@ -118,10 +125,9 @@ class PaperDenseIndex:
             if manifest!=expected or records!=[{k:v for k,v in row.items() if k!='abstract'}
                                                 for row in current]:
                 raise ValueError('Paper dense index source or model differs')
-            hashes=[row['text_hash'] for row in records]
-            vectors=_cached_vectors(self.store.db,model.model_id,hashes)
-            self.index=HNSWIndex({row['node_id']:vectors[row['text_hash']] for row in records},
-                                 model_id=model.model_id)
+            self.index=HNSWIndex.load(path/'hnsw',expected_model_id=model.model_id)
+            if set(self.index._vectors)!={row['node_id'] for row in records}:
+                raise ValueError('Paper dense index IDs differ')
             self.records={row['node_id']:row for row in records}
             self.manifest=manifest
         except BaseException:

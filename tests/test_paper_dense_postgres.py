@@ -4,14 +4,16 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 import uuid
 
 import psycopg
 from psycopg import sql
 
 from kg_builder.paper_dense import PaperDenseIndex, build
+from kg_builder.persistent_dense import PersistentDenseIndex, build as build_persistent, verify_source
 from kg_builder.postgres_graph import GraphStore
-from kg_builder.semantic_store import SemanticStore
+from kg_builder.semantic_store import SemanticStore, digest
 
 
 class Model:
@@ -128,3 +130,38 @@ class PaperDenseTests(unittest.TestCase):
         self.store.db.execute('DELETE FROM embedding_cache')
         with self.assertRaisesRegex(ValueError,'vectors missing'):
             build(self.run,self.path,model,database_url=self.url)
+
+    def test_six_kind_persistent_build_uses_only_cached_document_vectors(self):
+        model=Model()
+        build(self.run,self.path,model,database_url=self.url)
+        rows=[('ResearchProblem','e:r','Problem','alpha problem'),
+              ('Method','e:m','Method','beta method'),
+              ('Benchmark','e:b','Benchmark','beta benchmark')]
+        for kind,eid,name,description in rows:
+            self.store.db.execute('INSERT INTO entities VALUES(%s,%s,%s,%s,%s,%s,%s)',
+                (eid,kind,name,description,'source_authored','[]','rev'))
+        self.store.db.execute('INSERT INTO contributions VALUES(%s,%s,%s,%s,%s)',
+            ('c:1','x:p:a','k','alpha contribution','{}'))
+        self.store.db.execute('INSERT INTO research_areas VALUES(%s,%s,%s,%s)',
+            ('a:1','Area','alpha area','rev'))
+        for text in ['Problem\nalpha problem','Method\nbeta method','Benchmark\nbeta benchmark',
+                     'alpha contribution','Area\nalpha area']:
+            vector=[1.,0.] if 'alpha' in text else [0.,1.]
+            self.store.db.execute('INSERT INTO embedding_cache VALUES(%s,%s,%s)',
+                (model.model_id,digest(text),json.dumps(vector)))
+        target=Path(self.temp.name)/'six-kind'
+        manifest=build_persistent(self.run,target,model.model_id,
+            query_model_id=model.query_model_id,database_url=self.url,batch_size=2)
+        self.assertEqual(manifest['count'],7)
+        self.assertEqual(set(manifest['kind_counts']),
+            {'Paper','ResearchProblem','Method','Benchmark','Contribution','ResearchArea'})
+        self.assertEqual(manifest['kind_counts']['Paper'],2)
+        with patch('kg_builder.vector_index.HNSWIndex.upsert',side_effect=AssertionError('reinsert')):
+            index=PersistentDenseIndex(target,expected_run_id=self.run,
+                expected_graph_namespace='graph:test',expected_model_id=model.model_id)
+        self.assertEqual(index.search([1.,0.],types=['ResearchArea'],top_k=1)[0]['node_id'],'a:1')
+        self.assertEqual(index.search([1.,0.],types=['Paper'],top_k=1)[0]['kind'],'Paper')
+        self.assertEqual(verify_source(self.run,target,database_url=self.url)['count'],7)
+        self.store.db.execute("UPDATE research_areas SET description='changed' WHERE area_id='a:1'")
+        with self.assertRaisesRegex(ValueError,'differs'):
+            verify_source(self.run,target,database_url=self.url)
