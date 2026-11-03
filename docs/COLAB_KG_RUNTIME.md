@@ -41,7 +41,7 @@ print('Runtime commit:', subprocess.check_output(['git', '-C', '/content/kg-buil
                                                    'rev-parse', 'HEAD'], text=True).strip())
 print('Harness commit:', subprocess.check_output(['git', '-C', '/content/research-agent',
                                                    'rev-parse', 'HEAD'], text=True).strip())
-subprocess.run(['python', '-m', 'pip', 'install', '-q', '-e', '/content/kg-builder[neo4j,bm25,semantic]'], check=True)
+subprocess.run(['python', '-m', 'pip', 'install', '-q', '-e', '/content/kg-builder[neo4j,retrieval,voyage]'], check=True)
 subprocess.run(['python', '-m', 'pip', 'install', '-q', '-e', '/content/research-agent[harness]',
                 'neo4j-mcp-server==1.6.1', 'mcp>=1.30,<2'], check=True)
 os.environ['PYTHONPATH'] = '/content/kg-builder/src'
@@ -90,11 +90,16 @@ runuser -u postgres -- /usr/lib/postgresql/16/bin/pg_ctl -D /content/kg-runtime/
 ```python
 import os, secrets, psycopg
 from psycopg import sql
+from psycopg.conninfo import make_conninfo
 os.environ['PGHOST'] = '127.0.0.1'
 os.environ['PGPORT'] = '55432'
 os.environ['PGDATABASE'] = 'kg_colab'
 os.environ['PGUSER'] = 'kg_colab'
 os.environ['PGPASSWORD'] = secrets.token_urlsafe(32)
+os.environ['KG_GRAPH_DATABASE_URL'] = make_conninfo(
+    host=os.environ['PGHOST'], port=os.environ['PGPORT'],
+    dbname=os.environ['PGDATABASE'], user=os.environ['PGUSER'],
+    password=os.environ['PGPASSWORD'])
 with psycopg.connect(host='/content/kg-runtime/pgsocket', port=55432,
                      dbname='postgres', user='postgres', autocommit=True) as conn:
     conn.execute(sql.SQL('CREATE ROLE {} LOGIN PASSWORD {}').format(
@@ -206,13 +211,15 @@ print('APOC meta and restored graph ready')
 
 ```python
 from kg_builder.bm25_retrieval import BM25Index
-from kg_builder.persistent_dense import PersistentDenseIndex
+from kg_builder.persistent_dense import PersistentDenseIndex, verify_source
 with BM25Index(KG_BUNDLE / 'bm25', expected_run_id=manifest['run_id']) as index:
     assert index.manifest['counts'] == manifest['bm25_counts']
 index = PersistentDenseIndex(KG_BUNDLE / 'dense', expected_run_id=manifest['run_id'],
                              expected_graph_namespace=manifest['graph_namespace'],
                              expected_model_id=manifest['dense_model_id'])
 assert index.metadata['kind_counts'] == manifest['dense_counts']
+source_check = verify_source(manifest['run_id'], KG_BUNDLE / 'dense')
+assert source_check['source_fingerprint'] == index.metadata['source_fingerprint']
 print('BM25 and persistent HNSW loaded; all six-kind counts match')
 ```
 

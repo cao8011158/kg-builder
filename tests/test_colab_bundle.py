@@ -158,3 +158,6 @@ def test_colab_meta_and_official_mcp_contract():
     assert "'neo4j_get_schema', 'neo4j_read_cypher'" in document
     assert "'NEO4J_MCP_READ_ONLY'] = 'true'" in document
     assert "'NEO4J_MCP_TOOLS'] = 'get-schema,read-cypher'" in document
+    assert '/content/kg-builder[neo4j,retrieval,voyage]' in document
+    assert "os.environ['KG_GRAPH_DATABASE_URL'] = make_conninfo(" in document
+    assert "verify_source(manifest['run_id'], KG_BUNDLE / 'dense')" in document
