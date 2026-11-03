@@ -1,7 +1,12 @@
 """Build and query a frozen PostgreSQL graph BM25 index."""
 import argparse
+from contextlib import redirect_stdout
 import json
-from kg_builder.bm25_retrieval import BM25Index, TYPES, build
+import sys
+
+# BM25S prints a Windows resource diagnostic at import time; keep stdout JSON-only.
+with redirect_stdout(sys.stderr):
+    from kg_builder.bm25_retrieval import BM25Index, TYPES, build
 
 
 def main(argv=None):

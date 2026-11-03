@@ -1,5 +1,8 @@
 """Offline BM25S ranking and persisted-index contract."""
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -72,6 +75,19 @@ class BM25RetrievalTests(unittest.TestCase):
         output=StringIO()
         with redirect_stdout(output):main(['info','--index-dir',str(self.path)])
         self.assertEqual(json.loads(output.getvalue())['run_id'],'run:1')
+
+    def test_fresh_process_cli_stdout_is_json(self):
+        root=Path(__file__).resolve().parents[1]
+        env=dict(os.environ)
+        env['PYTHONPATH']=str(root/'src')
+        commands=[['info','--index-dir',str(self.path)],
+                  ['search','--index-dir',str(self.path),'--type','Paper','climate']]
+        for command in commands:
+            completed=subprocess.run([sys.executable,str(root/'scripts'/'bm25_retrieval.py'),*command],
+                cwd=root,env=env,capture_output=True,text=True,check=True)
+            parsed=json.loads(completed.stdout)
+            if command[0]=='info':self.assertEqual(parsed['run_id'],'run:1')
+            else:self.assertEqual(parsed[0]['node_id'],'paper:2')
 
 
 if __name__=='__main__':unittest.main()
