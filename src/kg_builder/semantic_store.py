@@ -104,6 +104,11 @@ class SemanticStore:
                 rows=self.db.execute('SELECT area_id,name,description FROM research_areas ORDER BY area_id').fetchall()
                 ids=[r['area_id'] for r in rows]
                 texts=[r['name'] + '\n' + r['description'] for r in rows]
+            elif kind=='Paper':
+                from .paper_dense import _papers
+                rows=_papers(self.db)
+                ids=[r['node_id'] for r in rows]
+                texts=[r['title'] + '\n' + (r['abstract'] or '') for r in rows]
             else:
                 rows = self.db.execute('SELECT entity_id,name,description FROM entities WHERE kind=%s ORDER BY entity_id',
                                        (kind,)).fetchall()
