@@ -546,6 +546,43 @@ def classify_scope(papers, client, min_confidence=0.7, *, decision_metric='proba
     return _run(list(papers), client, make, consume, category='scope' if decision_metric == 'probability' else None, context_format=context_format)
 
 
+def classify_scope_rules(papers, client, policy, min_confidence=0.7, *, decision_metric='probability', context_format='explicit-v1'):
+    """Screen papers against a validated saved rule policy using Jev choices.
+
+    An exclusion match wins; inclusion needs one match and every exclusion
+    confidently absent. Unresolved evidence stays pending unless all inclusion
+    rules are confidently absent or an exclusion is confidently present.
+    """
+    _threshold(min_confidence); _metric(decision_metric); _context_format(context_format)
+    includes=policy['inclusion_rules']; excludes=policy['exclusion_rules']
+
+    def make(item):
+        """Create one source-grounded choice per named screening rule."""
+        return {kind+'_'+rule['name']: _choice(
+            'Use state.items[INDEX].title and state.items[INDEX].text as source evidence. '
+            'Does this paper satisfy the following rule? '+rule['question']+' Use only supplied source content.',
+            _OPTIONS)
+            for kind,rules in (('include',includes),('exclude',excludes)) for rule in rules}
+
+    def consume(item, answers, raw):
+        """Apply exclusion priority and return the rule choices with the decision audit."""
+        if decision_metric=='probability':
+            for answer in answers.values():_score(answer,answer['choice'],decision_metric)
+        matched_in=[rule['name'] for rule in includes if _passes(answers['include_'+rule['name']],'yes',min_confidence,decision_metric)]
+        matched_ex=[rule['name'] for rule in excludes if _passes(answers['exclude_'+rule['name']],'yes',min_confidence,decision_metric)]
+        all_in_no=all(_passes(answers['include_'+rule['name']],'no',min_confidence,decision_metric) for rule in includes)
+        all_ex_no=all(_passes(answers['exclude_'+rule['name']],'no',min_confidence,decision_metric) for rule in excludes)
+        decision=('exclude' if matched_ex or all_in_no else
+                  'include' if matched_in and all_ex_no else 'pending')
+        return {'paper_id':item['paper_id'],'decision':decision,'topics':matched_in,
+                'reason':'Jev screening rules and '+decision_metric+' policy: '+decision,
+                'decision_metric':decision_metric,'matched_inclusion_rules':matched_in,
+                'matched_exclusion_rules':matched_ex,'rule_answers':answers,'raw':raw}
+
+    return _run(list(papers),client,make,consume,
+                category='scope' if decision_metric=='probability' else None,context_format=context_format)
+
+
 def review_extractions(items, client, min_confidence=0.7, *, decision_metric='probability', context_format='explicit-v1'):
     _threshold(min_confidence); _metric(decision_metric); _context_format(context_format)
     def make(item):

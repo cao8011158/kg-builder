@@ -28,7 +28,27 @@ python scripts/prepare_full_pipeline.py --run-dir /srv/kg/runs/example --run-id 
 
 The `run` subcommand calls the actual collectors and Jev decision service and requires `TYPESAFE_API_KEY`; only invoke it when those services and a real run are intended. External extraction workers must submit genuine, validated results. The example paths and run ID are illustrative and have not been deployed.
 
-The current Work environment cannot run a real local PostgreSQL server: it has no usable nonroot execution identity, and PostgreSQL refuses to run as root. This is an environment limit, not an integration test pass. The Actions service is the reproducible real-server check. Its passing result, once observed on a fixed commit, is evidence for that commit only.
+### Full-run screening rules
+
+The full preparation `run --plan path/to/plan.json` option accepts the existing `full-preparation-plan/1` JSON. Copy `config/full_preparation_plan.json` and adjust its discovery queries, date windows, and, optionally, add a top-level `screening_policy`:
+
+```json
+{"screening_policy": {
+  "schema": "scope-rules/1",
+  "inclusion_rules": [
+    {"name": "battery_aging", "question": "Does the paper present original research on grid battery degradation?"}
+  ],
+  "exclusion_rules": [
+    {"name": "survey", "question": "Is the paper a survey or literature review?"}
+  ]
+}}
+```
+
+This optional policy **replaces** the original LLM-agent/topic screening gate for that full run. An omitted `screening_policy` retains the original Phase 2 behavior. Each rule asks Jev for `yes`, `no`, or `insufficient` using only the supplied title and text. A confident `yes` on any exclusion rule excludes the paper. Otherwise, a confident `no` on every inclusion rule excludes it. A paper is included only if at least one inclusion rule is confidently `yes` and every exclusion rule is confidently `no`; all other outcomes remain pending. The saved run's probability threshold applies separately to each answer. An empty exclusion list is allowed and is decisively clear by definition. The inclusion list must be nonempty. Rule names must be unique lowercase identifiers starting with a letter; each rule needs a nonblank question. At most 24 rules fit one Jev question batch per paper. Names and questions are bounded to 64 and 500 characters, respectively.
+
+The screening policy is validated before a new run changes storage. The whole plan is saved with its discovery settings and loaded again on worker restart. Passing a changed plan to the same run ID is rejected. A `claim`, `submit`, `status`, or `snapshot` command loads the saved plan without needing `--plan`; `--plan` is available on `run` only. Screening decisions and individual rule answers remain in the paper scope audit. Discovery query terms are candidate retrieval criteria, not screening decisions. Extraction and later review still operate on the supplied paper text and keep their existing contracts; custom screening does not change extraction prompts or make a claim about unsupplied full text.
+
+The disposable local PostgreSQL fixture and the Actions service are reproducible integration checks, not durable production stores. A passing result applies to its tested revision and configuration only.
 
 ## Durable deployment requirements
 

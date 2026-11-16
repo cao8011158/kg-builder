@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 from pathlib import Path
+import re
 import threading
 import time
 from urllib.parse import urlencode
@@ -22,6 +23,35 @@ PLAN = Path(__file__).resolve().parents[2] / 'config/full_preparation_plan.json'
 OA_SELECT = 'id,doi,title,publication_year,publication_date,authorships,abstract_inverted_index,ids,primary_location,updated_date'
 SOURCE_ATTEMPTS = 5
 LOG = logging.getLogger(__name__)
+RULE_NAME = re.compile(r'[a-z][a-z0-9_]*\Z')
+
+
+def validate_screening_policy(plan):
+    """Reject malformed optional screening rules before a full run mutates storage.
+
+    A missing policy preserves the legacy Phase 2 decision. A present policy
+    replaces it and must fit within one Jev question batch per paper.
+    """
+    policy=plan.get('screening_policy')
+    if policy is None:
+        if 'screening_policy' in plan:raise ValueError('Invalid screening_policy')
+        return
+    if (not isinstance(policy,dict) or set(policy)!={'schema','inclusion_rules','exclusion_rules'}
+            or policy['schema']!='scope-rules/1'):
+        raise ValueError('Invalid screening_policy schema')
+    includes=policy['inclusion_rules']; excludes=policy['exclusion_rules']
+    if (not isinstance(includes,list) or not includes or not isinstance(excludes,list)
+            or len(includes)+len(excludes)>24):
+        raise ValueError('Invalid screening_policy rule counts')
+    names=set()
+    for rule in includes+excludes:
+        if (not isinstance(rule,dict) or set(rule)!={'name','question'}
+                or not isinstance(rule['name'],str) or not RULE_NAME.fullmatch(rule['name'])
+                or len(rule['name'])>64 or rule['name'] in names
+                or not isinstance(rule['question'],str) or not rule['question'].strip()
+                or len(rule['question'])>500):
+            raise ValueError('Invalid screening_policy rule')
+        names.add(rule['name'])
 
 
 def _transient_source_error(exc):
@@ -86,9 +116,12 @@ def parse_page(source, raw, position, received=0):
 
 class FullPreparationWorkflow(PreparationWorkflow):
     def __init__(self, run_dir, *, plan=None, fetcher=None, **kwargs):
+        """Open a full run with its frozen discovery and optional screening plan."""
         proposed=json.loads(PLAN.read_text(encoding='utf-8')) if plan is None else plan
-        if proposed['schema']!='full-preparation-plan/1' or proposed['page_size']!=100:
+        if (not isinstance(proposed,dict) or proposed.get('schema')!='full-preparation-plan/1'
+                or proposed.get('page_size')!=100):
             raise ValueError('Invalid full collection plan')
+        validate_screening_policy(proposed)
         self.fetcher=fetcher or fetch_page
         self._stop_collection=threading.Event()
         for field,value in (('target',0),('llm_mode','external'),('since',proposed['since']),
@@ -106,6 +139,7 @@ class FullPreparationWorkflow(PreparationWorkflow):
                 db.execute('SELECT pg_advisory_xact_lock(%s)',(lock_key,))
                 saved=db.execute('SELECT payload FROM full_plan WHERE id=1 FOR UPDATE').fetchone()
                 self.plan=json.loads(saved['payload']) if saved and plan is None else proposed
+                validate_screening_policy(self.plan)
                 if saved and saved['payload']!=CANON(self.plan):
                     raise ValueError('Full collection plan differs from saved plan')
                 if not saved:
@@ -124,6 +158,15 @@ class FullPreparationWorkflow(PreparationWorkflow):
                     db.execute('INSERT INTO full_streams(stream_id,source,windows_json,position) VALUES(%s,%s,%s,%s)',
                                ('arxiv-0','arxiv',CANON([{'since':self.plan['since'],'until':self.plan['until']}]),'0'))
         finally:self._release(db)
+
+    def _native_scope_decision(self, items, client):
+        """Screen papers with saved custom rules when the full plan defines them."""
+        if 'screening_policy' not in self.plan:
+            return super()._native_scope_decision(items,client)
+        from .decision_api import classify_scope_rules
+        return classify_scope_rules(items,client,self.plan['screening_policy'],
+            min_confidence=self.config['min_confidence'],decision_metric=self.decision_metric,
+            context_format=self.context_format)
 
     def _admit_full(self, record, source, db=None):
         published=record.get('published_at') or ''

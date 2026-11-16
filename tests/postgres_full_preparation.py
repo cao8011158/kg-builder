@@ -7,7 +7,8 @@ from xml.etree import ElementTree as ET
 from psycopg import sql
 
 from kg_builder.full_preparation import FullPreparationWorkflow, parse_page
-from tests.postgres_fixtures import PostgresCase, draft, Embedding
+from tests.postgres_fixtures import PostgresCase, draft, Embedding, source
+from tests.test_scope_rules import POLICY, RuleClient
 
 
 def paper(n, abstract=True):
@@ -68,6 +69,38 @@ class FullPreparationTests(PostgresCase):
         self.assertEqual(reopened.config['jev_concurrency'],8)
         with self.assertRaisesRegex(ValueError,'plan differs'):
             self.wf(plan={**custom,'openalex_query':'other'})
+    def test_saved_screening_policy_reopens_and_controls_scope(self):
+        from kg_builder.full_preparation import PLAN
+        custom={**json.loads(PLAN.read_text()),'screening_policy':POLICY}
+        w=self.workflow(FullPreparationWorkflow,self.tmp.name,plan=custom,
+                        fetcher=self.fetch,client=RuleClient({'battery':'yes','review':'no'}))
+        record={**source(831),'title':'Grid battery aging',
+                'abstract':'We measure degradation of grid batteries.'}
+        w.add_source(record,'arxiv','grid battery','grid_battery')
+        reopened=self.workflow(FullPreparationWorkflow,self.tmp.name,
+                              fetcher=self.fetch,client=RuleClient({'battery':'yes','review':'no'}))
+        self.assertEqual(reopened.plan['screening_policy'],POLICY)
+        self.assertEqual(reopened._scope_batch(),1)
+        db=reopened._db()
+        try:
+            row=db.execute('SELECT scope_state,scope_json FROM papers').fetchone()
+            self.assertEqual(row['scope_state'],'include')
+            self.assertEqual(json.loads(row['scope_json'])['matched_inclusion_rules'],['battery'])
+            self.assertEqual(self.scalar(db.execute("SELECT count(*) FROM tasks WHERE kind='extract'").fetchone()),1)
+        finally:reopened._release(db)
+        with self.assertRaisesRegex(ValueError,'plan differs'):
+            self.wf(plan={**custom,'screening_policy':{**POLICY,'exclusion_rules':[]}})
+    def test_explicit_scope_function_overrides_saved_rules(self):
+        from kg_builder.full_preparation import PLAN
+        custom={**json.loads(PLAN.read_text()),'screening_policy':POLICY}
+        def injected(items,client,min_confidence):
+            return [dict(paper_id=item['paper_id'],decision='exclude',topics=[],reason='injected',raw={})
+                    for item in items]
+        w=self.workflow(FullPreparationWorkflow,self.tmp.name,plan=custom,fetcher=self.fetch,
+                        client=object(),scope_fn=injected)
+        w.add_source({**source(832),'title':'Grid battery aging'},'arxiv','grid battery','grid_battery')
+        self.assertEqual(w._scope_batch(),1)
+        self.assertEqual(w.status()['papers']['exclude'],1)
     def test_replay_fetched_page_and_deferred_abstract(self):
         calls=[]
         def fetch(source,plan,window,pos):

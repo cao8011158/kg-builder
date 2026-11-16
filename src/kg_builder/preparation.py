@@ -239,8 +239,8 @@ class PreparationWorkflow:
         self._release(db)
 
     def _scope_batch(self):
-        from .decision_api import JevClient, classify_scope
-        fn=self.scope_fn or classify_scope
+        """Claim queued papers, record native or injected scope choices, and queue inclusions."""
+        from .decision_api import JevClient
         db=self._db(); now=time.time(); token=secrets.token_urlsafe(24)
         try:
             with db.transaction():
@@ -257,8 +257,8 @@ class PreparationWorkflow:
         if items:
             try:
                 client=self.client or JevClient(model=self.config['jev_model'])
-                results=(fn(items,client,min_confidence=self.config['min_confidence']) if self.scope_fn
-                         else self._native_decision(fn,items,client))
+                results=(self.scope_fn(items,client,min_confidence=self.config['min_confidence']) if self.scope_fn
+                         else self._native_scope_decision(items,client))
                 outcomes={o['paper_id']:o for o in results}
             except Exception as exc:
                 # Transient API failure leaves the items restartable.
@@ -299,6 +299,11 @@ class PreparationWorkflow:
                 db.execute("UPDATE run SET error=NULL WHERE id=1 AND error NOT LIKE 'collection_shortfall:%'")
             return len(rows)
         finally:self._release(db)
+
+    def _native_scope_decision(self, items, client):
+        """Apply the original agent and topic gate to papers without custom rules."""
+        from .decision_api import classify_scope
+        return self._native_decision(classify_scope,items,client)
 
     @staticmethod
     def _unique_api_seconds(outcomes):
